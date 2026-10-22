@@ -1,0 +1,1321 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wohnungsplaner 3D</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --line: #d9dde3; --text: #1f2328; --muted: #646d78;
+    --accent: #2f6fd6; --accent-weak: #e3ecfb; --danger: #c43b3b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-rows: auto 1fr; grid-template-columns: 270px 1fr; height: 100vh; overflow: hidden;
+  }
+  header {
+    grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+    padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0 6px 0 0; }
+  .group { display: flex; gap: 4px; align-items: center; }
+  .group > .lbl { color: var(--muted); margin-right: 2px; }
+  button, select, input[type=number], input[type=text] {
+    font: inherit; color: inherit; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  button { cursor: pointer; }
+  button:hover { background: var(--accent-weak); }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; background: #fff; }
+  button.active:disabled { background: var(--accent-weak); color: var(--text); }
+  aside { overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 10px 12px; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  aside h3 { font-size: 14px; margin: 0 0 8px; }
+  .cat-group { font-weight: 600; margin: 8px 0 4px; }
+  .catalog { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .catalog button { text-align: left; padding: 4px 6px; font-size: 12px; }
+  #props label { display: block; margin: 6px 0; color: var(--muted); }
+  #props label input, #props label select { display: block; width: 100%; margin-top: 2px; color: var(--text); }
+  #props input[type=color] { height: 30px; padding: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+  .row { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+  .hint { color: var(--muted); font-size: 12px; }
+  main { position: relative; overflow: hidden; }
+  #viewport { position: absolute; inset: 0; }
+  #viewport canvas { display: block; touch-action: none; }
+  #status {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 10px; font-size: 12px;
+    background: rgba(255,255,255,.88); border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between;
+  }
+  #status .warn { color: var(--danger); }
+  #loadError { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 20px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>Wohnungsplaner 3D</h1>
+  <div class="group">
+    <span class="lbl">Ansicht</span>
+    <button id="view2d" class="active">2D-Grundriss</button>
+    <button id="view3d">3D</button>
+    <button id="fitView" title="Ansicht auf die Wohnung zentrieren">Zentrieren</button>
+  </div>
+  <div class="group" id="toolGroup">
+    <span class="lbl">Werkzeug</span>
+    <button data-tool="select" class="active" title="Auswählen / Verschieben (V)">Auswählen</button>
+    <button data-tool="wall" title="Wände zeichnen (W)">Wand</button>
+    <button data-tool="door" title="Tür in Wand einsetzen (T)">Tür</button>
+    <button data-tool="window" title="Fenster in Wand einsetzen (F)">Fenster</button>
+    <button data-tool="calibrate" title="Maßstab des Grundriss-Bildes festlegen">Maßstab</button>
+  </div>
+  <div class="group">
+    <span class="lbl">Grundriss-Bild</span>
+    <button id="loadImage">Laden…</button>
+    <input type="file" id="imageFile" accept="image/*" hidden>
+    <input type="range" id="planOpacity" min="0" max="1" step="0.05" title="Deckkraft">
+    <label title="Grundriss-Bild auch in der 3D-Ansicht auf dem Boden zeigen"><input type="checkbox" id="plan3d"> in 3D</label>
+  </div>
+  <div class="group">
+    <span class="lbl">Wände (3D)</span>
+    <select id="wallMode">
+      <option value="full">voll</option>
+      <option value="transparent">transparent</option>
+      <option value="low">niedrig (1 m)</option>
+    </select>
+  </div>
+  <div class="group">
+    <span class="lbl">Variante</span>
+    <select id="variantSelect"></select>
+    <button id="variantNew" title="Aktuelle Einrichtung als neue Variante kopieren">+ Kopie</button>
+    <button id="variantRename">Umbenennen</button>
+    <button id="variantDelete" class="danger">Löschen</button>
+  </div>
+  <div class="group">
+    <button id="undo" title="Rückgängig (Strg+Z)">↶</button>
+    <button id="redo" title="Wiederholen (Strg+Y)">↷</button>
+    <button id="exportJson">Export</button>
+    <button id="importJson">Import</button>
+    <input type="file" id="jsonFile" accept="application/json,.json" hidden>
+    <button id="resetAll" class="danger" title="Alles löschen und neu beginnen">Neu</button>
+  </div>
+</header>
+
+<aside>
+  <h2>Eigenschaften</h2>
+  <div id="props"></div>
+  <h2>Möbel hinzufügen</h2>
+  <div id="catalog"></div>
+</aside>
+
+<main>
+  <div id="viewport"></div>
+  <div id="status"><span id="hint"></span><span id="coords"></span></div>
+  <div id="loadError">three.js konnte nicht geladen werden. Bitte Internetverbindung prüfen<br>(benötigt Zugriff auf cdn.jsdelivr.net).</div>
+</main>
+
+<script>
+  // Fallback-Hinweis, falls das Modul (three.js vom CDN) nicht lädt
+  window.__plannerStarted = false;
+  setTimeout(() => { if (!window.__plannerStarted) document.getElementById('loadError').style.display = 'grid'; }, 8000);
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+window.__plannerStarted = true;
+
+// ---------------------------------------------------------------------------
+// Grundeinstellungen & Datenmodell (alle Längen in Metern)
+// ---------------------------------------------------------------------------
+const STORAGE_KEY = 'wohnungsplaner.v1';
+const DEFAULT_SETTINGS = {
+  wallHeight: 2.5, wallThickness: 0.15,
+  doorWidth: 0.9, doorHeight: 2.0,
+  windowWidth: 1.2, windowSill: 0.9, windowTop: 2.1,
+  floorColor: '#d8c7a8', wallMode: 'full',
+};
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+function newState() {
+  return {
+    version: 1,
+    settings: { ...DEFAULT_SETTINGS },
+    plan: { image: null, width: 10, aspect: 1, opacity: 0.6, show3d: false },
+    walls: [],
+    variants: [{ id: uid(), name: 'Variante 1', items: [] }],
+    activeVariant: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Möbel-Katalog: einfache, parametrische Formen
+// ---------------------------------------------------------------------------
+const matCache = new Map();
+function mat(color, opts = {}) {
+  const key = color + JSON.stringify(opts);
+  if (!matCache.has(key)) matCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, ...opts }));
+  return matCache.get(key);
+}
+function shade(hex, f) {
+  const c = new THREE.Color(hex);
+  if (f < 1) c.multiplyScalar(f); else c.lerp(new THREE.Color('#ffffff'), Math.min(1, f - 1));
+  return '#' + c.getHexString();
+}
+// Quader mit Unterkante auf y
+function box(g, w, h, d, x, y, z, color, opts) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w, 0.002), Math.max(h, 0.002), Math.max(d, 0.002)), mat(color, opts));
+  m.position.set(x, y + Math.max(h, 0.002) / 2, z);
+  m.castShadow = m.receiveShadow = true;
+  g.add(m);
+  return m;
+}
+function cyl(g, rTop, rBot, h, x, y, z, color, opts) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, Math.max(h, 0.002), 24), mat(color, opts));
+  m.position.set(x, y + h / 2, z);
+  m.castShadow = m.receiveShadow = true;
+  g.add(m);
+  return m;
+}
+const GLASS = { transparent: true, opacity: 0.3, roughness: 0.1, depthWrite: false };
+
+const B = {
+  sofa(g, { w, d, h, color: c }) {
+    const arm = Math.min(0.22, w * 0.15), backD = Math.min(0.25, d * 0.3), seatH = Math.min(0.45, h * 0.55);
+    box(g, w - 0.1, 0.1, d - 0.1, 0, 0, 0, shade(c, 0.35));
+    box(g, w, seatH - 0.24, d, 0, 0.1, 0, c);
+    box(g, w - 2 * arm, 0.14, d - backD - 0.02, 0, seatH - 0.14, backD / 2, shade(c, 1.12));
+    box(g, w, h - 0.1, backD, 0, 0.1, -d / 2 + backD / 2, c);
+    for (const s of [-1, 1]) box(g, arm, Math.min(h, seatH + 0.2) - 0.1, d, s * (w / 2 - arm / 2), 0.1, 0, c);
+  },
+  bed(g, { w, d, h, color: c }) {
+    const frame = Math.min(0.3, h * 0.4);
+    box(g, w, frame, d, 0, 0, 0, c);
+    box(g, w - 0.06, 0.2, d - 0.1, 0, frame, 0.03, '#f3f1ec');
+    box(g, w, h, 0.08, 0, 0, -d / 2 + 0.04, shade(c, 0.85));
+    const n = w > 1.2 ? 2 : 1, pw = (w - 0.2) / n - 0.05;
+    for (let i = 0; i < n; i++) box(g, pw, 0.12, 0.35, -w / 2 + 0.1 + (i + 0.5) * (w - 0.2) / n, frame + 0.2, -d / 2 + 0.33, '#ffffff');
+    box(g, w - 0.02, 0.06, (d - 0.1) * 0.62, 0, frame + 0.2, d / 2 - (d - 0.1) * 0.31 - 0.04, shade(c, 1.45));
+  },
+  table(g, { w, d, h, color: c }) {
+    const t = 0.04, l = 0.05, ix = w / 2 - 0.06 - l / 2, iz = d / 2 - 0.06 - l / 2;
+    box(g, w, t, d, 0, h - t, 0, c);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, l, h - t, l, sx * ix, 0, sz * iz, shade(c, 0.6));
+  },
+  chair(g, { w, d, h, color: c }) {
+    const seat = Math.min(0.46, h * 0.5), l = 0.035;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, l, seat, l, sx * (w / 2 - l), 0, sz * (d / 2 - l), shade(c, 0.6));
+    box(g, w, 0.05, d, 0, seat, 0, c);
+    box(g, w, h - seat - 0.05, 0.04, 0, seat + 0.05, -d / 2 + 0.02, c);
+  },
+  wardrobe(g, { w, d, h, color: c }) {
+    box(g, w, h, d, 0, 0, 0, c);
+    const n = Math.max(1, Math.round(w / 0.5)), dark = shade(c, 0.55);
+    for (let i = 1; i < n; i++) box(g, 0.006, h - 0.04, 0.004, -w / 2 + (i * w) / n, 0.02, d / 2 + 0.002, dark);
+    for (let i = 0; i < n; i++) {
+      const x = -w / 2 + ((i + (i % 2 ? 0.12 : 0.88)) * w) / n;
+      box(g, 0.015, 0.25, 0.02, x, h * 0.45, d / 2 + 0.01, '#8a8f96', { metalness: 0.6, roughness: 0.4 });
+    }
+  },
+  shelf(g, { w, d, h, color: c }) {
+    const t = 0.02;
+    for (const s of [-1, 1]) box(g, t, h, d, s * (w / 2 - t / 2), 0, 0, c);
+    const n = Math.max(2, Math.round(h / 0.38));
+    for (let i = 0; i <= n; i++) box(g, w - 2 * t, t, d, 0, Math.min(h - t, (i * (h - t)) / n), 0, c);
+    box(g, w - 2 * t, h, 0.005, 0, 0, -d / 2 + 0.003, shade(c, 0.85));
+  },
+  sideboard(g, { w, d, h, color: c }) {
+    const leg = Math.min(0.1, h * 0.2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.03, leg, 0.03, sx * (w / 2 - 0.05), 0, sz * (d / 2 - 0.05), shade(c, 0.5));
+    box(g, w, h - leg, d, 0, leg, 0, c);
+    const n = Math.max(1, Math.round(w / 0.45));
+    for (let i = 1; i < n; i++) box(g, 0.006, h - leg - 0.04, 0.004, -w / 2 + (i * w) / n, leg + 0.02, d / 2 + 0.002, shade(c, 0.55));
+  },
+  tv(g, { w, d, h, color: c }) {
+    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.3 });
+    box(g, w - 0.03, h - 0.03, 0.002, 0, 0.015, d / 2 + 0.001, '#05070a', { roughness: 0.15 });
+  },
+  rug(g, { w, d, color: c }) {
+    const m = box(g, w, 0.012, d, 0, 0, 0, c, { roughness: 1 });
+    m.castShadow = false;
+  },
+  plant(g, { w, d, h, color: c }) {
+    const r = Math.min(w, d) / 2, potH = h * 0.3;
+    cyl(g, r * 0.6, r * 0.45, potH, 0, 0, 0, c);
+    const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), mat('#4f7d3a'));
+    s.scale.y = (h - potH) / (2 * r);
+    s.position.y = potH + (h - potH) / 2;
+    s.castShadow = s.receiveShadow = true;
+    g.add(s);
+  },
+  lamp(g, { w, h, color: c }) {
+    cyl(g, w * 0.4, w * 0.4, 0.03, 0, 0, 0, '#3a3a3a');
+    cyl(g, 0.012, 0.012, h - 0.3, 0, 0.03, 0, '#3a3a3a');
+    cyl(g, w * 0.32, w * 0.5, 0.3, 0, h - 0.3, 0, c, { emissive: '#ffe2a8', emissiveIntensity: 0.35 });
+  },
+  kitchen(g, { w, d, h, color: c }) {
+    const plinth = 0.1, top = 0.04;
+    box(g, w, plinth, d - 0.06, 0, 0, -0.03, '#4a4a4a');
+    box(g, w, h - plinth - top, d - 0.02, 0, plinth, -0.01, c);
+    box(g, w, top, d, 0, h - top, 0, '#bdb6aa');
+    const n = Math.max(1, Math.round(w / 0.6));
+    for (let i = 1; i < n; i++) box(g, 0.006, h - plinth - top - 0.02, 0.004, -w / 2 + (i * w) / n, plinth + 0.01, d / 2 - 0.018, shade(c, 0.6));
+  },
+  fridge(g, { w, d, h, color: c }) {
+    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.4 });
+    box(g, w - 0.01, 0.008, 0.004, 0, h * 0.62, d / 2 + 0.002, shade(c, 0.6));
+    box(g, 0.02, 0.3, 0.03, w / 2 - 0.06, h * 0.68, d / 2 + 0.015, '#8a8f96', { metalness: 0.6, roughness: 0.4 });
+  },
+  bathtub(g, { w, d, h, color: c }) {
+    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.3 });
+    box(g, w - 0.14, 0.02, d - 0.14, 0, h - 0.015, 0, '#cfe3ef', { roughness: 0.2 });
+  },
+  shower(g, { w, d, h, color: c }) {
+    box(g, w, 0.05, d, 0, 0, 0, c, { roughness: 0.3 });
+    box(g, w, h - 0.05, 0.01, 0, 0.05, d / 2 - 0.005, '#bfe0f2', GLASS);
+    box(g, 0.01, h - 0.05, d, w / 2 - 0.005, 0.05, 0, '#bfe0f2', GLASS);
+  },
+  wc(g, { w, d, h, color: c }) {
+    box(g, w, Math.min(0.4, h * 0.5), 0.18, 0, h - Math.min(0.4, h * 0.5), -d / 2 + 0.09, c, { roughness: 0.3 });
+    const r = w / 2 * 0.95;
+    const bowl = cyl(g, r, r * 0.75, 0.4, 0, 0, -d / 2 + 0.18 + (d - 0.18) / 2, c, { roughness: 0.3 });
+    bowl.scale.z = (d - 0.18) / (2 * r);
+  },
+  basin(g, { w, d, h, color: c }) {
+    box(g, w, h - 0.12, d - 0.02, 0, 0, -0.01, c);
+    box(g, w, 0.12, d, 0, h - 0.12, 0, '#ffffff', { roughness: 0.3 });
+    box(g, w * 0.6, 0.01, d * 0.6, 0, h - 0.005, 0.02, '#dfe9ef', { roughness: 0.2 });
+  },
+  box(g, { w, d, h, color: c }) { box(g, w, h, d, 0, 0, 0, c); },
+};
+
+// Typ-Schlüssel -> Bezeichnung, Gruppe, Standardmaße (B x T x H in m), Farbe, Erzeuger
+const CATALOG = {
+  sofa3:      { label: 'Sofa 3-Sitzer',  group: 'Wohnen',          w: 2.1,  d: 0.9,  h: 0.85, color: '#6b7b8c', b: 'sofa' },
+  sofa2:      { label: 'Sofa 2-Sitzer',  group: 'Wohnen',          w: 1.6,  d: 0.9,  h: 0.85, color: '#6b7b8c', b: 'sofa' },
+  armchair:   { label: 'Sessel',         group: 'Wohnen',          w: 0.85, d: 0.85, h: 0.85, color: '#a0785a', b: 'sofa' },
+  coffee:     { label: 'Couchtisch',     group: 'Wohnen',          w: 1.0,  d: 0.6,  h: 0.42, color: '#8b6a4a', b: 'table' },
+  tvboard:    { label: 'TV-Board',       group: 'Wohnen',          w: 1.8,  d: 0.4,  h: 0.5,  color: '#e8e4dc', b: 'sideboard' },
+  tv:         { label: 'Fernseher',      group: 'Wohnen',          w: 1.23, d: 0.05, h: 0.71, color: '#1b1b1b', b: 'tv', elev: 0.5 },
+  shelf:      { label: 'Regal',          group: 'Wohnen',          w: 0.8,  d: 0.35, h: 1.9,  color: '#d9cbb2', b: 'shelf' },
+  sideboard:  { label: 'Sideboard',      group: 'Wohnen',          w: 1.6,  d: 0.45, h: 0.8,  color: '#7a5c43', b: 'sideboard' },
+  rug:        { label: 'Teppich',        group: 'Wohnen',          w: 2.0,  d: 1.4,  h: 0.01, color: '#b8a99a', b: 'rug' },
+  lamp:       { label: 'Stehlampe',      group: 'Wohnen',          w: 0.4,  d: 0.4,  h: 1.6,  color: '#efe6d2', b: 'lamp' },
+  plant:      { label: 'Pflanze',        group: 'Wohnen',          w: 0.5,  d: 0.5,  h: 1.2,  color: '#c4b8a8', b: 'plant' },
+  bed160:     { label: 'Doppelbett',     group: 'Schlafen',        w: 1.6,  d: 2.1,  h: 0.9,  color: '#9a8c7c', b: 'bed' },
+  bed90:      { label: 'Einzelbett',     group: 'Schlafen',        w: 0.9,  d: 2.0,  h: 0.8,  color: '#9a8c7c', b: 'bed' },
+  wardrobe:   { label: 'Kleiderschrank', group: 'Schlafen',        w: 2.0,  d: 0.6,  h: 2.2,  color: '#f0ede6', b: 'wardrobe' },
+  dresser:    { label: 'Kommode',        group: 'Schlafen',        w: 1.0,  d: 0.45, h: 0.85, color: '#f0ede6', b: 'sideboard' },
+  nightstand: { label: 'Nachttisch',     group: 'Schlafen',        w: 0.45, d: 0.4,  h: 0.5,  color: '#8b6a4a', b: 'sideboard' },
+  dining:     { label: 'Esstisch',       group: 'Essen & Arbeiten', w: 1.6, d: 0.9,  h: 0.75, color: '#a07850', b: 'table' },
+  chair:      { label: 'Stuhl',          group: 'Essen & Arbeiten', w: 0.45, d: 0.52, h: 0.9, color: '#3d3d3d', b: 'chair' },
+  desk:       { label: 'Schreibtisch',   group: 'Essen & Arbeiten', w: 1.4, d: 0.7,  h: 0.75, color: '#e5e0d6', b: 'table' },
+  kitchen:    { label: 'Küchenzeile',    group: 'Küche',           w: 2.4,  d: 0.6,  h: 0.9,  color: '#f2f2f0', b: 'kitchen' },
+  fridge:     { label: 'Kühlschrank',    group: 'Küche',           w: 0.6,  d: 0.65, h: 1.8,  color: '#d8dcdf', b: 'fridge' },
+  bathtub:    { label: 'Badewanne',      group: 'Bad',             w: 1.7,  d: 0.75, h: 0.6,  color: '#fbfbfb', b: 'bathtub' },
+  shower:     { label: 'Dusche',         group: 'Bad',             w: 0.9,  d: 0.9,  h: 2.0,  color: '#fbfbfb', b: 'shower' },
+  wc:         { label: 'WC',             group: 'Bad',             w: 0.38, d: 0.6,  h: 0.8,  color: '#fbfbfb', b: 'wc' },
+  basin:      { label: 'Waschtisch',     group: 'Bad',             w: 0.8,  d: 0.48, h: 0.85, color: '#ffffff', b: 'basin' },
+  box:        { label: 'Quader (frei)',  group: 'Sonstiges',       w: 1.0,  d: 1.0,  h: 1.0,  color: '#9a9a9a', b: 'box' },
+};
+
+// ---------------------------------------------------------------------------
+// Zustand laden
+// ---------------------------------------------------------------------------
+let state = loadState();
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return normalizeState(JSON.parse(raw));
+  } catch (e) { console.warn('Laden aus dem Browser-Speicher fehlgeschlagen', e); }
+  return normalizeState(newState());
+}
+function normalizeState(s) {
+  const base = newState();
+  const out = { ...base, ...s, settings: { ...base.settings, ...(s.settings || {}) }, plan: { ...base.plan, ...(s.plan || {}) } };
+  if (!Array.isArray(out.walls)) out.walls = [];
+  if (!Array.isArray(out.variants) || !out.variants.length) out.variants = base.variants;
+  out.variants.forEach(v => { if (!Array.isArray(v.items)) v.items = []; });
+  out.items && delete out.items;
+  out.walls = out.walls.filter(w => w && w.a && w.b);
+  out.variants.forEach(v => { v.items = v.items.filter(it => CATALOG[it.type]); });
+  if (!out.variants.some(v => v.id === out.activeVariant)) out.activeVariant = out.variants[0].id;
+  return out;
+}
+const variant = () => state.variants.find(v => v.id === state.activeVariant);
+const items = () => variant().items;
+const getItem = id => items().find(i => i.id === id);
+const getWall = id => state.walls.find(w => w.id === id);
+
+let saveTimer = null, saveWarning = '';
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 300);
+}
+function saveNow() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    saveWarning = '';
+  } catch (e) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, plan: { ...state.plan, image: null } }));
+      saveWarning = 'Browser-Speicher voll: Grundriss-Bild nicht gespeichert – bitte „Export“ nutzen.';
+    } catch (e2) {
+      saveWarning = 'Speichern im Browser nicht möglich – bitte „Export“ nutzen.';
+    }
+  }
+  updateHint();
+}
+
+// Rückgängig / Wiederholen (Grundriss-Bild selbst ist ausgenommen)
+const undoStack = [], redoStack = [];
+const snapshot = () => JSON.stringify({ settings: state.settings, walls: state.walls, variants: state.variants, activeVariant: state.activeVariant, planWidth: state.plan.width });
+function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 100) undoStack.shift(); redoStack.length = 0; updateUndoButtons(); }
+function restore(snap) {
+  const s = JSON.parse(snap);
+  Object.assign(state, { settings: s.settings, walls: s.walls, variants: s.variants, activeVariant: s.activeVariant });
+  state.plan.width = s.planWidth;
+  selection = null;
+  refreshAll();
+  scheduleSave();
+}
+function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateUndoButtons(); }
+function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateUndoButtons(); }
+function updateUndoButtons() { $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length; }
+
+// ---------------------------------------------------------------------------
+// three.js Szene
+// ---------------------------------------------------------------------------
+const $ = s => document.querySelector(s);
+const viewportEl = $('#viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+viewportEl.appendChild(renderer.domElement);
+const canvas = renderer.domElement;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#eef1f4');
+scene.add(new THREE.HemisphereLight('#ffffff', '#b9b1a3', 1.4));
+const sun = new THREE.DirectionalLight('#ffffff', 1.6);
+sun.position.set(6, 12, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0005;
+scene.add(sun, sun.target);
+
+const perspCam = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
+perspCam.position.set(8, 10, 12);
+const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 500);
+orthoCam.up.set(0, 0, -1);
+const ortho = { cx: 0, cz: 0, h: 12 };
+
+// eigener Pointer-Handler VOR OrbitControls registrieren, damit Möbel-Ziehen das Drehen verhindern kann
+canvas.addEventListener('pointerdown', onPointerDown);
+const controls = new OrbitControls(perspCam, canvas);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.enabled = false;
+
+const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: state.settings.floorColor, roughness: 0.9 }));
+floorMesh.rotation.x = -Math.PI / 2;
+floorMesh.receiveShadow = true;
+scene.add(floorMesh);
+
+const grid = new THREE.GridHelper(100, 100, '#9aa3ad', '#c9cfd6');
+grid.position.y = 0.004;
+grid.material.transparent = true;
+grid.material.opacity = 0.5;
+scene.add(grid);
+
+let planMesh = null, planTexture = null, planTextureSrc = null;
+const wallsGroup = new THREE.Group(), itemsGroup = new THREE.Group(), handlesGroup = new THREE.Group();
+scene.add(wallsGroup, itemsGroup, handlesGroup);
+
+const selBox = new THREE.Box3();
+const selHelper = new THREE.Box3Helper(selBox, '#ff8a1f');
+selHelper.visible = false;
+scene.add(selHelper);
+
+function makeLine(color) {
+  const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
+  const l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, depthTest: false }));
+  l.renderOrder = 10; l.visible = false; l.frustumCulled = false;
+  scene.add(l);
+  return l;
+}
+const previewLine = makeLine('#e0452b');
+const calibLine = makeLine('#2f6fd6');
+const snapMarker = new THREE.Mesh(new THREE.RingGeometry(0.6, 1, 24), new THREE.MeshBasicMaterial({ color: '#e0452b', depthTest: false }));
+snapMarker.rotation.x = -Math.PI / 2; snapMarker.renderOrder = 11; snapMarker.visible = false;
+scene.add(snapMarker);
+function setLine(line, a, b, y = 3.2) {
+  const p = line.geometry.attributes.position;
+  p.setXYZ(0, a.x, y, a.z); p.setXYZ(1, b.x, y, b.z); p.needsUpdate = true;
+  line.visible = true;
+}
+
+// ---------------------------------------------------------------------------
+// Ansicht / Werkzeug
+// ---------------------------------------------------------------------------
+let mode = '2d';          // '2d' | '3d'
+let tool = 'select';      // select | wall | door | window | calibrate
+let selection = null;     // { kind: 'item'|'wall', id }
+const draw = { chain: null, calib: [] };
+const camera = () => (mode === '2d' ? orthoCam : perspCam);
+
+function setMode(m) {
+  mode = m;
+  $('#view2d').classList.toggle('active', m === '2d');
+  $('#view3d').classList.toggle('active', m === '3d');
+  document.querySelectorAll('#toolGroup button').forEach(b => (b.disabled = m === '3d'));
+  controls.enabled = m === '3d';
+  if (m === '3d') setTool('select');
+  endChain();
+  refreshAll();
+}
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('#toolGroup button').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+  endChain();
+  draw.calib = []; calibLine.visible = false;
+  canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  rebuildHandles();
+  updateHint();
+}
+
+function resize() {
+  const w = viewportEl.clientWidth, h = viewportEl.clientHeight;
+  renderer.setSize(w, h);
+  perspCam.aspect = w / h; perspCam.updateProjectionMatrix();
+  updateOrtho();
+}
+function updateOrtho() {
+  const w = viewportEl.clientWidth || 1, h = viewportEl.clientHeight || 1, a = w / h;
+  orthoCam.left = (-ortho.h * a) / 2; orthoCam.right = (ortho.h * a) / 2;
+  orthoCam.top = ortho.h / 2; orthoCam.bottom = -ortho.h / 2;
+  orthoCam.position.set(ortho.cx, 100, ortho.cz);
+  orthoCam.lookAt(ortho.cx, 0, ortho.cz);
+  orthoCam.updateProjectionMatrix();
+}
+const pxToM = px => (ortho.h / (viewportEl.clientHeight || 1)) * px;
+
+function contentBounds() {
+  const b = new THREE.Box3();
+  for (const w of state.walls) { b.expandByPoint(new THREE.Vector3(w.a.x, 0, w.a.z)); b.expandByPoint(new THREE.Vector3(w.b.x, 0, w.b.z)); }
+  for (const it of items()) b.expandByPoint(new THREE.Vector3(it.x, 0, it.z));
+  if (b.isEmpty() && state.plan.image) {
+    const hw = state.plan.width / 2, hd = (state.plan.width * state.plan.aspect) / 2;
+    b.set(new THREE.Vector3(-hw, 0, -hd), new THREE.Vector3(hw, 0, hd));
+  }
+  if (b.isEmpty()) b.set(new THREE.Vector3(-5, 0, -4), new THREE.Vector3(5, 0, 4));
+  return b;
+}
+function fitView() {
+  const b = contentBounds(), c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
+  const a = (viewportEl.clientWidth || 1) / (viewportEl.clientHeight || 1);
+  ortho.cx = c.x; ortho.cz = c.z; ortho.h = Math.max(s.z, s.x / a, 3) * 1.2;
+  updateOrtho();
+  const r = Math.max(s.x, s.z, 4);
+  controls.target.copy(c);
+  perspCam.position.set(c.x + r * 0.55, r * 0.95, c.z + r * 0.95);
+  controls.update();
+}
+
+// ---------------------------------------------------------------------------
+// Aufbau der Szene aus dem Zustand
+// ---------------------------------------------------------------------------
+function disposeGroup(g) {
+  for (const ch of [...g.children]) {
+    ch.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    g.remove(ch);
+  }
+}
+
+function rebuildFloor() {
+  const b = contentBounds(), c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
+  floorMesh.scale.set(Math.max(s.x + 4, 20), Math.max(s.z + 4, 20), 1);
+  floorMesh.position.set(c.x, 0, c.z);
+  floorMesh.material.color.set(state.settings.floorColor);
+  const r = Math.max(s.x, s.z, 8) * 0.8 + 2;
+  Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, far: 60 });
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.position.set(c.x + 6, 14, c.z + 8);
+  sun.target.position.copy(c);
+  grid.visible = mode === '2d';
+  sun.castShadow = mode === '3d';
+}
+
+function rebuildPlan() {
+  const p = state.plan;
+  if (!p.image) {
+    if (planMesh) { scene.remove(planMesh); planMesh.geometry.dispose(); planMesh = null; }
+    return;
+  }
+  if (planTextureSrc !== p.image) {
+    planTexture && planTexture.dispose();
+    planTexture = new THREE.TextureLoader().load(p.image);
+    planTexture.colorSpace = THREE.SRGBColorSpace;
+    planTextureSrc = p.image;
+  }
+  if (!planMesh) {
+    planMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
+    planMesh.rotation.x = -Math.PI / 2;
+    planMesh.position.y = 0.002;
+    planMesh.renderOrder = 1;
+    scene.add(planMesh);
+  }
+  planMesh.material.map = planTexture;
+  planMesh.material.opacity = p.opacity;
+  planMesh.material.needsUpdate = true;
+  planMesh.scale.set(p.width, p.width * p.aspect, 1);
+  planMesh.visible = mode === '2d' || p.show3d;
+}
+
+const samePt = (p, q) => Math.abs(p.x - q.x) < 1e-4 && Math.abs(p.z - q.z) < 1e-4;
+const dist = (p, q) => Math.hypot(p.x - q.x, p.z - q.z);
+
+// Wandende verlängern, wenn dort eine nicht-gerade fortgesetzte Wand anschließt (saubere Ecken)
+function extendAt(w, end) {
+  const p = w[end], dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+  for (const o of state.walls) {
+    if (o === w || !(samePt(o.a, p) || samePt(o.b, p))) continue;
+    const ox = o.b.x - o.a.x, oz = o.b.z - o.a.z, OL = Math.hypot(ox, oz);
+    if (OL < 1e-4) continue;
+    if (Math.abs((dx * oz - dz * ox) / (L * OL)) > 0.05) return true;
+  }
+  return false;
+}
+
+function wallMaterial(selected, kind) {
+  if (mode === '2d') {
+    if (kind === 'door') return mat(selected ? '#e8833a' : '#c08a4a', { roughness: 1 });
+    if (kind === 'window') return mat(selected ? '#e8833a' : '#6fb3e0', { roughness: 1 });
+    return mat(selected ? '#e8833a' : '#3b3f45', { roughness: 1 });
+  }
+  const color = selected ? '#f0a060' : '#f4f2ee';
+  return state.settings.wallMode === 'transparent' ? mat(color, { transparent: true, opacity: 0.3, depthWrite: false }) : mat(color);
+}
+function addSlab(g, len, y0, y1, t, off, material, wallId) {
+  if (y1 - y0 < 0.001) return;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(len, y1 - y0, t), material);
+  m.position.set(off, (y0 + y1) / 2, 0);
+  m.castShadow = mode === '3d' && state.settings.wallMode === 'full';
+  m.receiveShadow = true;
+  m.userData.wallId = wallId;
+  g.add(m);
+}
+
+function rebuildWalls() {
+  disposeGroup(wallsGroup);
+  const low = mode === '3d' && state.settings.wallMode === 'low';
+  for (const w of state.walls) {
+    const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+    if (L < 1e-4) continue;
+    const g = new THREE.Group();
+    g.position.set((w.a.x + w.b.x) / 2, 0, (w.a.z + w.b.z) / 2);
+    g.rotation.y = -Math.atan2(dz, dx);
+    const sel = selection?.kind === 'wall' && selection.id === w.id;
+    const t = w.t, H = low ? Math.min(w.h, 1) : w.h;
+    if (w.type === 'wall') {
+      const ea = extendAt(w, 'a') ? t / 2 : 0, eb = extendAt(w, 'b') ? t / 2 : 0;
+      addSlab(g, L + ea + eb, 0, H, t, (eb - ea) / 2, wallMaterial(sel, 'wall'), w.id);
+    } else if (mode === '2d') {
+      addSlab(g, L, 0, 0.05, t * 0.9, 0, wallMaterial(sel, w.type), w.id);
+    } else if (w.type === 'door') {
+      addSlab(g, L, w.oh, H, t, 0, wallMaterial(sel, 'wall'), w.id);
+    } else {
+      addSlab(g, L, 0, Math.min(w.sill, H), t, 0, wallMaterial(sel, 'wall'), w.id);
+      addSlab(g, L, w.top, H, t, 0, wallMaterial(sel, 'wall'), w.id);
+      addSlab(g, L, w.sill, Math.min(w.top, H), 0.02, 0, mat('#9fd0f0', GLASS), w.id);
+    }
+    wallsGroup.add(g);
+  }
+  rebuildHandles();
+}
+
+function uniqueEndpoints() {
+  const pts = [];
+  for (const w of state.walls) for (const p of [w.a, w.b]) if (!pts.some(q => samePt(p, q))) pts.push(p);
+  return pts;
+}
+const handleGeo = new THREE.PlaneGeometry(1, 1);
+const handleMat = new THREE.MeshBasicMaterial({ color: '#ff7a1a', depthTest: false });
+function rebuildHandles() {
+  for (const ch of [...handlesGroup.children]) handlesGroup.remove(ch);
+  if (mode !== '2d' || tool !== 'select') return;
+  for (const p of uniqueEndpoints()) {
+    const m = new THREE.Mesh(handleGeo, handleMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(p.x, 3.1, p.z);
+    m.renderOrder = 12;
+    handlesGroup.add(m);
+  }
+}
+
+const itemObjects = new Map();
+function buildItemObject(it) {
+  const def = CATALOG[it.type];
+  const g = new THREE.Group();
+  B[def.b](g, it);
+  g.position.set(it.x, it.elev || 0, it.z);
+  g.rotation.y = -THREE.MathUtils.degToRad(it.rot);
+  g.userData.itemId = it.id;
+  return g;
+}
+function rebuildItems() {
+  disposeGroup(itemsGroup);
+  itemObjects.clear();
+  for (const it of items()) {
+    const g = buildItemObject(it);
+    itemsGroup.add(g);
+    itemObjects.set(it.id, g);
+  }
+  updateSelectionHelper();
+}
+function rebuildItem(it) {
+  const old = itemObjects.get(it.id);
+  if (old) { old.traverse(o => o.geometry && o.geometry.dispose()); itemsGroup.remove(old); }
+  const g = buildItemObject(it);
+  itemsGroup.add(g);
+  itemObjects.set(it.id, g);
+  updateSelectionHelper();
+}
+function updateSelectionHelper() {
+  const obj = selection?.kind === 'item' && itemObjects.get(selection.id);
+  selHelper.visible = !!obj;
+  if (obj) selBox.setFromObject(obj).expandByScalar(0.02);
+}
+
+function refreshAll() {
+  rebuildFloor();
+  rebuildPlan();
+  rebuildWalls();
+  rebuildItems();
+  renderVariantSelect();
+  renderProps();
+  syncHeaderInputs();
+  updateHint();
+}
+
+// ---------------------------------------------------------------------------
+// Bearbeitungs-Funktionen
+// ---------------------------------------------------------------------------
+function newWall(a, b) {
+  const s = state.settings;
+  return { id: uid(), type: 'wall', a: { ...a }, b: { ...b }, t: s.wallThickness, h: s.wallHeight };
+}
+function addItem(type, at) {
+  const d = CATALOG[type];
+  const p = at || viewCenter();
+  pushUndo();
+  const it = { id: uid(), type, x: round2(p.x), z: round2(p.z), rot: 0, w: d.w, d: d.d, h: d.h, elev: d.elev || 0, color: d.color };
+  items().push(it);
+  rebuildItem(it);
+  select({ kind: 'item', id: it.id });
+  scheduleSave();
+}
+const round2 = v => Math.round(v * 100) / 100;
+function viewCenter() {
+  return mode === '2d' ? { x: ortho.cx, z: ortho.cz } : { x: controls.target.x, z: controls.target.z };
+}
+function select(s) {
+  selection = s;
+  updateSelectionHelper();
+  rebuildWalls();
+  renderProps();
+}
+function deleteSelection() {
+  if (!selection) return;
+  pushUndo();
+  if (selection.kind === 'item') variant().items = items().filter(i => i.id !== selection.id);
+  else state.walls = state.walls.filter(w => w.id !== selection.id);
+  selection = null;
+  rebuildItems(); rebuildWalls(); rebuildFloor(); renderProps();
+  scheduleSave();
+}
+function duplicateSelection() {
+  if (selection?.kind !== 'item') return;
+  const src = getItem(selection.id);
+  pushUndo();
+  const it = { ...src, id: uid(), x: round2(src.x + 0.3), z: round2(src.z + 0.3) };
+  items().push(it);
+  rebuildItem(it);
+  select({ kind: 'item', id: it.id });
+  scheduleSave();
+}
+function rotateSelection(delta) {
+  if (selection?.kind !== 'item') return;
+  const it = getItem(selection.id);
+  pushUndo();
+  it.rot = (((it.rot + delta) % 360) + 360) % 360;
+  rebuildItem(it); renderProps(); scheduleSave();
+}
+function replaceItem(it, type) {
+  const d = CATALOG[type];
+  pushUndo();
+  Object.assign(it, { type, w: d.w, d: d.d, h: d.h, elev: d.elev || 0, color: d.color });
+  rebuildItem(it); renderProps(); scheduleSave();
+}
+function moveEndpoint(oldP, newP) {
+  for (const w of state.walls) for (const k of ['a', 'b']) if (samePt(w[k], oldP)) w[k] = { ...newP };
+}
+function setWallLength(w, L) {
+  const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, cur = Math.hypot(dx, dz);
+  if (cur < 1e-6 || !(L > 0)) return;
+  const nb = { x: w.a.x + (dx / cur) * L, z: w.a.z + (dz / cur) * L };
+  moveEndpoint({ ...w.b }, nb);
+}
+
+// Tür/Fenster: Wand an Klickstelle in drei Teile teilen
+function insertOpening(p, type) {
+  const tol = pxToM(12);
+  let best = null, bd = Infinity, bt = 0;
+  for (const w of state.walls) {
+    if (w.type !== 'wall') continue;
+    const { d, t } = pointSegment(p, w.a, w.b);
+    if (d < Math.max(w.t / 2, tol) && d < bd) { best = w; bd = d; bt = t; }
+  }
+  if (!best) { flash('Bitte direkt auf eine Wand klicken.'); return; }
+  const s = state.settings, L = dist(best.a, best.b);
+  const width = Math.min(type === 'door' ? s.doorWidth : s.windowWidth, L - 0.02);
+  if (width < 0.2) { flash('Die Wand ist zu kurz für diese Öffnung.'); return; }
+  const c = Math.min(Math.max(bt * L, width / 2), L - width / 2);
+  const at = u => ({ x: best.a.x + ((best.b.x - best.a.x) * u) / L, z: best.a.z + ((best.b.z - best.a.z) * u) / L });
+  const p1 = at(c - width / 2), p2 = at(c + width / 2);
+  pushUndo();
+  const idx = state.walls.indexOf(best), parts = [];
+  if (c - width / 2 > 0.005) parts.push({ ...best, id: uid(), b: p1 });
+  const op = { ...best, id: uid(), type, a: p1, b: p2 };
+  if (type === 'door') op.oh = s.doorHeight; else { op.sill = s.windowSill; op.top = s.windowTop; }
+  parts.push(op);
+  if (L - (c + width / 2) > 0.005) parts.push({ ...best, id: uid(), a: p2 });
+  state.walls.splice(idx, 1, ...parts);
+  selection = { kind: 'wall', id: op.id };
+  rebuildWalls(); renderProps(); scheduleSave();
+}
+function pointSegment(p, a, b) {
+  const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
+  const t = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / L2)) : 0;
+  return { t, d: Math.hypot(p.x - (a.x + t * dx), p.z - (a.z + t * dz)) };
+}
+
+// Fangen an Wandenden und 45°-Winkeln, Länge auf cm gerundet
+let snapLabel = '';
+function snapPoint(raw, free, exclude = null) {
+  const tol = pxToM(12);
+  let best = null, bd = tol;
+  const cands = uniqueEndpoints().concat(draw.chain || []);
+  for (const q of cands) {
+    if (exclude && samePt(q, exclude)) continue;
+    const d = dist(raw, q);
+    if (d < bd) { bd = d; best = q; }
+  }
+  snapLabel = '';
+  if (best) { snapLabel = 'Endpunkt'; return { x: best.x, z: best.z }; }
+  const last = draw.chain && draw.chain[draw.chain.length - 1];
+  if (!last) return { x: round2(raw.x), z: round2(raw.z) };
+  let ang = Math.atan2(raw.z - last.z, raw.x - last.x);
+  const L = Math.round(dist(raw, last) * 100) / 100;
+  if (!free) {
+    const r = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+    if (Math.abs(ang - r) < THREE.MathUtils.degToRad(7)) { ang = r; snapLabel = Math.round(THREE.MathUtils.radToDeg(-r) + 360) % 360 + '°'; }
+  }
+  return { x: last.x + Math.cos(ang) * L, z: last.z + Math.sin(ang) * L };
+}
+function wallToolClick(raw, e) {
+  const p = snapPoint(raw, e.shiftKey);
+  if (!draw.chain) { draw.chain = [p]; return; }
+  const last = draw.chain[draw.chain.length - 1];
+  if (dist(p, last) < 0.01) { endChain(); return; }
+  pushUndo();
+  state.walls.push(newWall(last, p));
+  const closes = draw.chain.length > 1 && samePt(p, draw.chain[0]);
+  draw.chain.push(p);
+  rebuildWalls(); rebuildFloor(); scheduleSave();
+  if (closes) endChain();
+}
+function endChain() {
+  draw.chain = null;
+  previewLine.visible = false;
+  snapMarker.visible = false;
+}
+
+function calibrateClick(p) {
+  draw.calib.push(p);
+  if (draw.calib.length < 2) return;
+  const [a, b] = draw.calib, measured = dist(a, b);
+  draw.calib = [];
+  calibLine.visible = false;
+  if (measured < 0.01) return;
+  const input = prompt(`Gemessener Abstand im Bild: ${(measured * 100).toFixed(0)} cm (aktueller Maßstab).\nWie lang ist diese Strecke in Wirklichkeit? (in cm)`);
+  if (input === null) return;
+  const real = parseFloat(String(input).replace(',', '.')) / 100;
+  if (!(real > 0)) { flash('Ungültige Eingabe.'); return; }
+  const f = real / measured;
+  pushUndo();
+  state.plan.width *= f;
+  for (const w of state.walls) { w.a = { x: w.a.x * f, z: w.a.z * f }; w.b = { x: w.b.x * f, z: w.b.z * f }; }
+  for (const v of state.variants) for (const it of v.items) { it.x *= f; it.z *= f; }
+  ortho.cx *= f; ortho.cz *= f; ortho.h *= f; updateOrtho();
+  refreshAll();
+  scheduleSave();
+  setTool('select');
+  flash(`Maßstab gesetzt (Faktor ${f.toFixed(3)}).`);
+}
+
+// ---------------------------------------------------------------------------
+// Maus / Tastatur
+// ---------------------------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+function setRay(e) {
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera());
+}
+function groundPoint(e) {
+  setRay(e);
+  const v = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(groundPlane, v) ? { x: v.x, z: v.z } : null;
+}
+function hitItem(e) {
+  setRay(e);
+  const hit = raycaster.intersectObjects(itemsGroup.children, true)[0];
+  let o = hit && hit.object;
+  while (o && !o.userData.itemId) o = o.parent;
+  return o ? o.userData.itemId : null;
+}
+function hitWall3d(e) {
+  setRay(e);
+  const hit = raycaster.intersectObjects(wallsGroup.children, true)[0];
+  return hit ? hit.object.userData.wallId : null;
+}
+function nearestWall2d(p) {
+  const tol = pxToM(8);
+  let best = null, bd = Infinity;
+  for (const w of state.walls) {
+    const { d } = pointSegment(p, w.a, w.b);
+    if (d < Math.max(w.t / 2, tol) && d < bd) { bd = d; best = w; }
+  }
+  return best;
+}
+
+let drag = null;
+function onPointerDown(e) {
+  const p = groundPoint(e);
+  if (mode === '2d' && (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey))) {
+    drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, cx: ortho.cx, cz: ortho.cz };
+    return;
+  }
+  if (e.button !== 0 || !p) return;
+
+  if (mode === '3d') {
+    const id = hitItem(e);
+    if (id) { startItemDrag(id, p); controls.enabled = false; return; }
+    drag = { kind: 'click3d', sx: e.clientX, sy: e.clientY, wallId: hitWall3d(e) };
+    return;
+  }
+
+  if (tool === 'wall') return wallToolClick(p, e);
+  if (tool === 'door' || tool === 'window') return insertOpening(p, tool);
+  if (tool === 'calibrate') return calibrateClick(p);
+
+  const tol = pxToM(9);
+  const ep = uniqueEndpoints().find(q => dist(q, p) < tol);
+  if (ep) { drag = { kind: 'endpoint', from: { ...ep }, cur: { ...ep }, moved: false }; return; }
+  const id = hitItem(e);
+  if (id) return startItemDrag(id, p);
+  const w = nearestWall2d(p);
+  if (w) return select({ kind: 'wall', id: w.id });
+  if (selection) select(null);
+  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, cx: ortho.cx, cz: ortho.cz };
+}
+function startItemDrag(id, p) {
+  const it = getItem(id);
+  if (!(selection?.kind === 'item' && selection.id === id)) select({ kind: 'item', id });
+  drag = { kind: 'item', id, ox: it.x - p.x, oz: it.z - p.z, moved: false };
+}
+
+window.addEventListener('pointermove', e => {
+  const inCanvas = e.target === canvas;
+  const p = inCanvas || drag ? groundPoint(e) : null;
+  if (p && inCanvas) $('#coords').textContent = `x ${(p.x * 100).toFixed(0)} cm · y ${(p.z * 100).toFixed(0)} cm`;
+
+  if (drag?.kind === 'pan') {
+    const m = ortho.h / viewportEl.clientHeight;
+    ortho.cx = drag.cx - (e.clientX - drag.sx) * m;
+    ortho.cz = drag.cz - (e.clientY - drag.sy) * m;
+    updateOrtho();
+    return;
+  }
+  if (drag?.kind === 'item' && p) {
+    const it = getItem(drag.id);
+    if (!drag.moved) { pushUndo(); drag.moved = true; }
+    it.x = round2(p.x + drag.ox); it.z = round2(p.z + drag.oz);
+    const g = itemObjects.get(it.id);
+    g.position.x = it.x; g.position.z = it.z;
+    updateSelectionHelper();
+    return;
+  }
+  if (drag?.kind === 'endpoint' && p) {
+    const np = snapPoint(p, true, drag.from);
+    if (!drag.moved) { pushUndo(); drag.moved = true; }
+    moveEndpoint(drag.cur, np);
+    drag.cur = np;
+    rebuildWalls();
+    return;
+  }
+  if (mode === '2d' && tool === 'wall' && p) {
+    const sp = snapPoint(p, e.shiftKey);
+    snapMarker.visible = !!snapLabel;
+    snapMarker.position.set(sp.x, 3.2, sp.z);
+    snapMarker.scale.setScalar(pxToM(7));
+    if (draw.chain) {
+      const last = draw.chain[draw.chain.length - 1];
+      setLine(previewLine, last, sp);
+      updateHint(`Länge: ${(dist(last, sp) * 100).toFixed(0)} cm${snapLabel ? ' · Fang: ' + snapLabel : ''}`);
+    }
+  }
+  if (mode === '2d' && tool === 'calibrate' && draw.calib.length === 1 && p) {
+    setLine(calibLine, draw.calib[0], p);
+    updateHint(`Strecke: ${(dist(draw.calib[0], p) * 100).toFixed(0)} cm (aktueller Maßstab)`);
+  }
+});
+window.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  controls.enabled = mode === '3d';
+  if (d.kind === 'item' && d.moved) { renderProps(); rebuildFloor(); scheduleSave(); }
+  if (d.kind === 'endpoint' && d.moved) { rebuildFloor(); renderProps(); scheduleSave(); }
+  if (d.kind === 'click3d' && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) {
+    select(d.wallId ? { kind: 'wall', id: d.wallId } : null);
+  }
+});
+canvas.addEventListener('dblclick', () => { if (tool === 'wall') endChain(); });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+  if (mode !== '2d') return;
+  e.preventDefault();
+  const before = groundPoint(e);
+  ortho.h = Math.min(200, Math.max(1, ortho.h * Math.exp(e.deltaY * 0.0015)));
+  updateOrtho();
+  const after = groundPoint(e);
+  if (before && after) { ortho.cx += before.x - after.x; ortho.cz += before.z - after.z; updateOrtho(); }
+}, { passive: false });
+
+window.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicateSelection(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelection(); }
+  else if (k === 'escape' || k === 'enter') { if (draw.chain) endChain(); else if (k === 'escape') { draw.calib = []; calibLine.visible = false; select(null); } }
+  else if (k === 'r') rotateSelection(e.shiftKey ? 15 : 90);
+  else if (mode === '2d' && k === 'v') setTool('select');
+  else if (mode === '2d' && k === 'w') setTool('wall');
+  else if (mode === '2d' && k === 't') setTool('door');
+  else if (mode === '2d' && k === 'f') setTool('window');
+});
+
+// ---------------------------------------------------------------------------
+// Seitenleiste: Katalog & Eigenschaften
+// ---------------------------------------------------------------------------
+function renderCatalog() {
+  const groups = {};
+  for (const [k, d] of Object.entries(CATALOG)) (groups[d.group] ||= []).push([k, d]);
+  $('#catalog').innerHTML = Object.entries(groups).map(([g, list]) =>
+    `<div class="cat-group">${g}</div><div class="catalog">${list.map(([k, d]) => `<button data-add="${k}" title="${cmTxt(d.w)} × ${cmTxt(d.d)} × ${cmTxt(d.h)} cm">${d.label}</button>`).join('')}</div>`).join('');
+  $('#catalog').addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (b) addItem(b.dataset.add); });
+}
+const cmTxt = v => Math.round(v * 100);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function numField(label, field, value, attrs = 'min="1"') {
+  return `<label>${label}<input type="number" data-f="${field}" value="${value}" ${attrs}></label>`;
+}
+
+function renderProps() {
+  const el = $('#props');
+  if (selection?.kind === 'item') {
+    const it = getItem(selection.id);
+    if (!it) { selection = null; return renderProps(); }
+    const def = CATALOG[it.type];
+    el.innerHTML = `
+      <h3>${def.label}</h3>
+      <label>Ersetzen durch
+        <select id="pReplace">${Object.entries(CATALOG).map(([k, d]) => `<option value="${k}" ${k === it.type ? 'selected' : ''}>${d.group}: ${d.label}</option>`).join('')}</select>
+      </label>
+      <div class="grid2">
+        ${numField('Breite (cm)', 'w', cmTxt(it.w))}
+        ${numField('Tiefe (cm)', 'd', cmTxt(it.d))}
+        ${numField('Höhe (cm)', 'h', cmTxt(it.h))}
+        ${numField('über Boden (cm)', 'elev', cmTxt(it.elev || 0), 'min="0"')}
+        ${numField('Position x (cm)', 'x', cmTxt(it.x), '')}
+        ${numField('Position y (cm)', 'z', cmTxt(it.z), '')}
+      </div>
+      ${numField('Drehung (°)', 'rot', it.rot, 'step="1"')}
+      <div class="row"><button data-rot="-90">⟲ 90°</button><button data-rot="-15">⟲ 15°</button><button data-rot="15">⟳ 15°</button><button data-rot="90">⟳ 90°</button></div>
+      <label>Farbe <input type="color" data-f="color" value="${it.color}"></label>
+      <div class="row"><button id="pDup">Duplizieren</button><button id="pDel" class="danger">Löschen</button></div>
+      <p class="hint">Ziehen zum Verschieben · R: 90° drehen · Shift+R: 15° · Entf: löschen · Strg+D: duplizieren</p>`;
+    el.querySelector('#pReplace').onchange = e => replaceItem(it, e.target.value);
+    el.querySelectorAll('[data-rot]').forEach(b => (b.onclick = () => rotateSelection(+b.dataset.rot)));
+    el.querySelector('#pDup').onclick = duplicateSelection;
+    el.querySelector('#pDel').onclick = deleteSelection;
+    el.querySelectorAll('[data-f]').forEach(inp => (inp.onchange = () => {
+      const f = inp.dataset.f;
+      let v = inp.value;
+      if (f !== 'color') {
+        v = parseFloat(String(v).replace(',', '.'));
+        if (!isFinite(v)) return renderProps();
+        if (f === 'rot') v = ((v % 360) + 360) % 360;
+        else v = v / 100;
+        if (['w', 'd', 'h'].includes(f) && v <= 0) return renderProps();
+        if (f === 'elev' && v < 0) v = 0;
+      }
+      pushUndo();
+      it[f] = v;
+      rebuildItem(it); rebuildFloor(); scheduleSave();
+    }));
+    return;
+  }
+  if (selection?.kind === 'wall') {
+    const w = getWall(selection.id);
+    if (!w) { selection = null; return renderProps(); }
+    const L = dist(w.a, w.b);
+    el.innerHTML = `
+      <h3>${{ wall: 'Wand', door: 'Tür', window: 'Fenster' }[w.type]}</h3>
+      <label>Art
+        <select data-f="type"><option value="wall">Wand</option><option value="door">Tür (Öffnung)</option><option value="window">Fenster</option></select>
+      </label>
+      <div class="grid2">
+        ${numField('Länge (cm)', 'len', cmTxt(L))}
+        ${numField('Dicke (cm)', 't', cmTxt(w.t))}
+        ${numField('Raumhöhe (cm)', 'h', cmTxt(w.h))}
+        ${w.type === 'door' ? numField('Türhöhe (cm)', 'oh', cmTxt(w.oh)) : ''}
+        ${w.type === 'window' ? numField('Brüstung (cm)', 'sill', cmTxt(w.sill), 'min="0"') + numField('Oberkante (cm)', 'top', cmTxt(w.top)) : ''}
+      </div>
+      <div class="row"><button id="pDel" class="danger">Löschen</button></div>
+      <p class="hint">Die Länge wird am Endpunkt verändert, angeschlossene Wände folgen. Wandecken (orange Quadrate) lassen sich im 2D-Werkzeug „Auswählen“ ziehen.</p>`;
+    el.querySelector('[data-f="type"]').value = w.type;
+    el.querySelector('#pDel').onclick = deleteSelection;
+    el.querySelectorAll('[data-f]').forEach(inp => (inp.onchange = () => {
+      const f = inp.dataset.f, s = state.settings;
+      pushUndo();
+      if (f === 'type') {
+        w.type = inp.value;
+        if (w.type === 'door' && w.oh == null) w.oh = s.doorHeight;
+        if (w.type === 'window' && w.sill == null) { w.sill = s.windowSill; w.top = s.windowTop; }
+      } else {
+        const v = parseFloat(String(inp.value).replace(',', '.')) / 100;
+        if (!(v >= 0) || (f !== 'sill' && v === 0)) { undoStack.pop(); return renderProps(); }
+        if (f === 'len') setWallLength(w, v); else w[f] = v;
+      }
+      rebuildWalls(); rebuildFloor(); renderProps(); scheduleSave();
+    }));
+    return;
+  }
+  const s = state.settings;
+  el.innerHTML = `
+    <p class="hint">Nichts ausgewählt. Standardwerte für neue Wände, Türen und Fenster:</p>
+    <div class="grid2">
+      ${numField('Wandhöhe (cm)', 'wallHeight', cmTxt(s.wallHeight))}
+      ${numField('Wanddicke (cm)', 'wallThickness', cmTxt(s.wallThickness))}
+      ${numField('Türbreite (cm)', 'doorWidth', cmTxt(s.doorWidth))}
+      ${numField('Türhöhe (cm)', 'doorHeight', cmTxt(s.doorHeight))}
+      ${numField('Fensterbreite (cm)', 'windowWidth', cmTxt(s.windowWidth))}
+      ${numField('Brüstung (cm)', 'windowSill', cmTxt(s.windowSill), 'min="0"')}
+      ${numField('Fenster-Oberkante (cm)', 'windowTop', cmTxt(s.windowTop))}
+    </div>
+    <div class="row"><button id="applyHeight">Wandhöhe auf alle Wände anwenden</button></div>
+    <label>Bodenfarbe <input type="color" id="floorColor" value="${s.floorColor}"></label>
+    <p class="hint"><b>So geht's:</b> 1. Grundriss-Bild laden. 2. „Maßstab“: zwei Punkte mit bekanntem Abstand anklicken und echte Länge eingeben. 3. „Wand“: Wände nachzeichnen. 4. „Tür“/„Fenster“: auf Wände klicken. 5. Möbel aus der Liste hinzufügen und verschieben; über „Ersetzen durch“ austauschen. Varianten für verschiedene Einrichtungen anlegen.</p>`;
+  el.querySelectorAll('[data-f]').forEach(inp => (inp.onchange = () => {
+    const v = parseFloat(String(inp.value).replace(',', '.')) / 100;
+    if (!(v >= 0)) return renderProps();
+    pushUndo();
+    s[inp.dataset.f] = v;
+    scheduleSave();
+  }));
+  el.querySelector('#applyHeight').onclick = () => {
+    pushUndo();
+    state.walls.forEach(w => (w.h = s.wallHeight));
+    rebuildWalls(); scheduleSave();
+  };
+  el.querySelector('#floorColor').onchange = e => { pushUndo(); s.floorColor = e.target.value; rebuildFloor(); scheduleSave(); };
+}
+
+// ---------------------------------------------------------------------------
+// Kopfzeile: Varianten, Bild, Export/Import
+// ---------------------------------------------------------------------------
+function renderVariantSelect() {
+  $('#variantSelect').innerHTML = state.variants.map(v => `<option value="${v.id}" ${v.id === state.activeVariant ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+  $('#variantDelete').disabled = state.variants.length < 2;
+}
+$('#variantSelect').onchange = e => { state.activeVariant = e.target.value; selection = null; rebuildItems(); rebuildFloor(); renderProps(); scheduleSave(); };
+$('#variantNew').onclick = () => {
+  const name = prompt('Name der neuen Variante:', `Variante ${state.variants.length + 1}`);
+  if (!name) return;
+  pushUndo();
+  const v = { id: uid(), name, items: items().map(it => ({ ...it, id: uid() })) };
+  state.variants.push(v);
+  state.activeVariant = v.id;
+  selection = null;
+  refreshAll(); scheduleSave();
+};
+$('#variantRename').onclick = () => {
+  const name = prompt('Neuer Name:', variant().name);
+  if (!name) return;
+  pushUndo(); variant().name = name; renderVariantSelect(); scheduleSave();
+};
+$('#variantDelete').onclick = () => {
+  if (state.variants.length < 2 || !confirm(`Variante „${variant().name}“ löschen?`)) return;
+  pushUndo();
+  state.variants = state.variants.filter(v => v.id !== state.activeVariant);
+  state.activeVariant = state.variants[0].id;
+  selection = null;
+  refreshAll(); scheduleSave();
+};
+
+function syncHeaderInputs() {
+  $('#planOpacity').value = state.plan.opacity;
+  $('#plan3d').checked = state.plan.show3d;
+  $('#wallMode').value = state.settings.wallMode;
+}
+$('#planOpacity').oninput = e => { state.plan.opacity = +e.target.value; rebuildPlan(); scheduleSave(); };
+$('#plan3d').onchange = e => { state.plan.show3d = e.target.checked; rebuildPlan(); scheduleSave(); };
+$('#wallMode').onchange = e => { state.settings.wallMode = e.target.value; rebuildWalls(); scheduleSave(); };
+
+$('#loadImage').onclick = () => $('#imageFile').click();
+$('#imageFile').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // auf max. 2048 px verkleinern, damit es in den Browser-Speicher passt
+      const scale = Math.min(1, 2048 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      state.plan.image = c.toDataURL('image/jpeg', 0.85);
+      state.plan.aspect = c.height / c.width;
+      rebuildPlan();
+      if (!state.walls.length) { rebuildFloor(); fitView(); }
+      scheduleSave();
+      setMode('2d');
+      setTool('calibrate');
+      flash('Bild geladen. Jetzt den Maßstab festlegen: zwei Punkte mit bekanntem Abstand anklicken.');
+    };
+    img.onerror = () => flash('Bild konnte nicht gelesen werden.');
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+$('#exportJson').onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `wohnung-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('#importJson').onclick = () => $('#jsonFile').click();
+$('#jsonFile').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  file.text().then(txt => {
+    const data = JSON.parse(txt);
+    if (!Array.isArray(data.walls) || !Array.isArray(data.variants)) throw new Error('format');
+    if (!confirm('Aktuellen Stand durch die importierte Datei ersetzen?')) return;
+    pushUndo();
+    state = normalizeState(data);
+    selection = null;
+    refreshAll(); fitView(); saveNow();
+  }).catch(() => flash('Datei ist keine gültige Wohnungsplaner-Datei.'));
+};
+$('#resetAll').onclick = () => {
+  if (!confirm('Alles löschen (Grundriss, Wände, alle Varianten)? Tipp: vorher „Export“.')) return;
+  pushUndo();
+  state = normalizeState(newState());
+  selection = null;
+  refreshAll(); fitView(); saveNow();
+};
+$('#undo').onclick = undo;
+$('#redo').onclick = redo;
+$('#view2d').onclick = () => setMode('2d');
+$('#view3d').onclick = () => setMode('3d');
+$('#fitView').onclick = fitView;
+document.querySelectorAll('#toolGroup button').forEach(b => (b.onclick = () => setTool(b.dataset.tool)));
+
+// ---------------------------------------------------------------------------
+// Statuszeile
+// ---------------------------------------------------------------------------
+let flashMsg = '', flashTimer = null;
+function flash(msg) { flashMsg = msg; clearTimeout(flashTimer); flashTimer = setTimeout(() => { flashMsg = ''; updateHint(); }, 5000); updateHint(); }
+function updateHint(extra) {
+  const hints = {
+    select: 'Klicken: auswählen · Möbel/Wandecken ziehen · freie Fläche ziehen, rechte Maustaste oder Alt+Ziehen: verschieben · Mausrad: Zoom',
+    wall: 'Klicken setzt Wandpunkte · Doppelklick, Enter oder Esc beendet · Shift: ohne Winkelfang',
+    door: `Auf eine Wand klicken, um eine Tür (${cmTxt(state.settings.doorWidth)} cm) einzusetzen`,
+    window: `Auf eine Wand klicken, um ein Fenster (${cmTxt(state.settings.windowWidth)} cm) einzusetzen`,
+    calibrate: 'Zwei Punkte mit bekanntem Abstand anklicken (z. B. Enden einer bemaßten Wand)',
+  };
+  const base = mode === '3d' ? 'Linke Maustaste: drehen · rechte: verschieben · Mausrad: Zoom · Möbel anklicken und ziehen' : hints[tool];
+  const el = $('#hint');
+  el.innerHTML = saveWarning ? `<span class="warn">${esc(saveWarning)}</span>` : esc(flashMsg || extra || base);
+}
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+renderCatalog();
+new ResizeObserver(resize).observe(viewportEl);
+resize();
+refreshAll();
+fitView();
+setTool('select');
+updateUndoButtons();
+
+renderer.setAnimationLoop(() => {
+  if (mode === '3d') controls.update();
+  if (mode === '2d') { const s = pxToM(9); handlesGroup.children.forEach(h => h.scale.set(s, s, 1)); }
+  renderer.render(scene, camera());
+});
+
+// für automatisierte Tests
+window.__planner = {
+  get state() { return state; }, setMode, setTool, addItem, fitView, select,
+  toScreen(x, z, y = 0) {
+    const v = new THREE.Vector3(x, y, z).project(camera());
+    return [((v.x + 1) / 2) * canvas.clientWidth, ((1 - v.y) / 2) * canvas.clientHeight];
+  },
+};
+</script>
+</body>
+</html>
