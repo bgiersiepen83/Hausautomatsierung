@@ -53,6 +53,42 @@
   }
   #status .warn { color: var(--danger); }
   #loadError { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 20px; }
+  #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .room-label {
+    position: absolute; left: 0; top: 0; white-space: nowrap; text-align: center; font-size: 12px; line-height: 1.25;
+    background: rgba(255,255,255,.85); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
+  }
+  .room-label b { font-weight: 600; }
+  #drawBar { position: absolute; top: 10px; right: 10px; display: none; gap: 6px; }
+  #drawBar button { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  table.rooms { width: 100%; border-collapse: collapse; margin: 4px 0 8px; }
+  table.rooms td { padding: 4px 2px; border-bottom: 1px solid var(--line); }
+  table.rooms td:last-child { text-align: right; white-space: nowrap; }
+  table.rooms tr[data-room] { cursor: pointer; }
+  table.rooms tr[data-room]:hover { background: var(--accent-weak); }
+  table.rooms tr.sum td { font-weight: 600; border-bottom: none; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; border: 1px solid rgba(0,0,0,.2); }
+  .warn { color: var(--danger); }
+  body { touch-action: manipulation; }
+  #panelToggle { display: none; }
+
+  /* Tablet / Handy: Seitenleiste wird zum ausklappbaren Bereich unten */
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; }
+    header { grid-column: 1; flex-wrap: nowrap; overflow-x: auto; }
+    header .group, header h1 { flex: none; }
+    main { grid-column: 1; grid-row: 2; }
+    aside {
+      position: fixed; left: 0; right: 0; bottom: 0; height: 55vh; z-index: 20; border-right: none;
+      border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.15);
+      transform: translateY(100%); transition: transform .2s ease;
+    }
+    body.panel-open aside { transform: none; }
+    #panelToggle { display: inline-block; }
+  }
+  @media (pointer: coarse) {
+    button, select, input[type=number], input[type=text] { min-height: 38px; padding: 6px 10px; }
+  }
 </style>
 <script type="importmap">
 {
@@ -65,6 +101,7 @@
 </head>
 <body>
 <header>
+  <button id="panelToggle" title="Möbel &amp; Eigenschaften ein-/ausblenden">☰ Panel</button>
   <h1>Wohnungsplaner 3D</h1>
   <div class="group">
     <span class="lbl">Ansicht</span>
@@ -78,6 +115,8 @@
     <button data-tool="wall" title="Wände zeichnen (W)">Wand</button>
     <button data-tool="door" title="Tür in Wand einsetzen (T)">Tür</button>
     <button data-tool="window" title="Fenster in Wand einsetzen (F)">Fenster</button>
+    <button data-tool="room" title="In einen umschlossenen Bereich klicken: Raum wird erkannt">Raum</button>
+    <button data-tool="roomdraw" title="Raum als Polygon von Hand zeichnen">Raum ✎</button>
     <button data-tool="calibrate" title="Maßstab des Grundriss-Bildes festlegen">Maßstab</button>
   </div>
   <div class="group">
@@ -121,6 +160,8 @@
 
 <main>
   <div id="viewport"></div>
+  <div id="labels"></div>
+  <div id="drawBar"><button id="drawDone" class="active">Fertig</button><button id="drawCancel">Abbrechen</button></div>
   <div id="status"><span id="hint"></span><span id="coords"></span></div>
   <div id="loadError">three.js konnte nicht geladen werden. Bitte Internetverbindung prüfen<br>(benötigt Zugriff auf cdn.jsdelivr.net).</div>
 </main>
@@ -156,7 +197,8 @@ function newState() {
     settings: { ...DEFAULT_SETTINGS },
     plan: { image: null, width: 10, aspect: 1, opacity: 0.6, show3d: false },
     walls: [],
-    variants: [{ id: uid(), name: 'Variante 1', items: [] }],
+    rooms: [],
+    variants: [{ id: uid(), name: 'Variante 1', items: [], roomColors: {} }],
     activeVariant: null,
   };
 }
@@ -347,8 +389,13 @@ function normalizeState(s) {
   const base = newState();
   const out = { ...base, ...s, settings: { ...base.settings, ...(s.settings || {}) }, plan: { ...base.plan, ...(s.plan || {}) } };
   if (!Array.isArray(out.walls)) out.walls = [];
+  if (!Array.isArray(out.rooms)) out.rooms = [];
+  out.rooms = out.rooms.filter(r => r && Array.isArray(r.poly) && r.poly.length >= 3);
   if (!Array.isArray(out.variants) || !out.variants.length) out.variants = base.variants;
-  out.variants.forEach(v => { if (!Array.isArray(v.items)) v.items = []; });
+  out.variants.forEach(v => {
+    if (!Array.isArray(v.items)) v.items = [];
+    if (!v.roomColors || typeof v.roomColors !== 'object') v.roomColors = {};
+  });
   out.items && delete out.items;
   out.walls = out.walls.filter(w => w && w.a && w.b);
   out.variants.forEach(v => { v.items = v.items.filter(it => CATALOG[it.type]); });
@@ -359,6 +406,8 @@ const variant = () => state.variants.find(v => v.id === state.activeVariant);
 const items = () => variant().items;
 const getItem = id => items().find(i => i.id === id);
 const getWall = id => state.walls.find(w => w.id === id);
+const getRoom = id => state.rooms.find(r => r.id === id);
+const roomColor = r => variant().roomColors[r.id] || r.color;
 
 let saveTimer = null, saveWarning = '';
 function scheduleSave() {
@@ -382,11 +431,11 @@ function saveNow() {
 
 // Rückgängig / Wiederholen (Grundriss-Bild selbst ist ausgenommen)
 const undoStack = [], redoStack = [];
-const snapshot = () => JSON.stringify({ settings: state.settings, walls: state.walls, variants: state.variants, activeVariant: state.activeVariant, planWidth: state.plan.width });
+const snapshot = () => JSON.stringify({ settings: state.settings, walls: state.walls, rooms: state.rooms, variants: state.variants, activeVariant: state.activeVariant, planWidth: state.plan.width });
 function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 100) undoStack.shift(); redoStack.length = 0; updateUndoButtons(); }
 function restore(snap) {
   const s = JSON.parse(snap);
-  Object.assign(state, { settings: s.settings, walls: s.walls, variants: s.variants, activeVariant: s.activeVariant });
+  Object.assign(state, { settings: s.settings, walls: s.walls, rooms: s.rooms || [], variants: s.variants, activeVariant: s.activeVariant });
   state.plan.width = s.planWidth;
   selection = null;
   refreshAll();
@@ -443,8 +492,8 @@ grid.material.opacity = 0.5;
 scene.add(grid);
 
 let planMesh = null, planTexture = null, planTextureSrc = null;
-const wallsGroup = new THREE.Group(), itemsGroup = new THREE.Group(), handlesGroup = new THREE.Group();
-scene.add(wallsGroup, itemsGroup, handlesGroup);
+const wallsGroup = new THREE.Group(), itemsGroup = new THREE.Group(), handlesGroup = new THREE.Group(), roomsGroup = new THREE.Group();
+scene.add(roomsGroup, wallsGroup, itemsGroup, handlesGroup);
 
 const selBox = new THREE.Box3();
 const selHelper = new THREE.Box3Helper(selBox, '#ff8a1f');
@@ -459,6 +508,7 @@ function makeLine(color) {
   return l;
 }
 const previewLine = makeLine('#e0452b');
+const roomPreview = makeLine('#2f9d5b');
 const calibLine = makeLine('#2f6fd6');
 const snapMarker = new THREE.Mesh(new THREE.RingGeometry(0.6, 1, 24), new THREE.MeshBasicMaterial({ color: '#e0452b', depthTest: false }));
 snapMarker.rotation.x = -Math.PI / 2; snapMarker.renderOrder = 11; snapMarker.visible = false;
@@ -468,6 +518,11 @@ function setLine(line, a, b, y = 3.2) {
   p.setXYZ(0, a.x, y, a.z); p.setXYZ(1, b.x, y, b.z); p.needsUpdate = true;
   line.visible = true;
 }
+function setPolyline(line, pts, y = 3.2) {
+  line.geometry.dispose();
+  line.geometry = new THREE.BufferGeometry().setFromPoints(pts.map(p => new THREE.Vector3(p.x, y, p.z)));
+  line.visible = pts.length > 1;
+}
 
 // ---------------------------------------------------------------------------
 // Ansicht / Werkzeug
@@ -475,7 +530,7 @@ function setLine(line, a, b, y = 3.2) {
 let mode = '2d';          // '2d' | '3d'
 let tool = 'select';      // select | wall | door | window | calibrate
 let selection = null;     // { kind: 'item'|'wall', id }
-const draw = { chain: null, calib: [] };
+const draw = { chain: null, calib: [], room: null };
 const camera = () => (mode === '2d' ? orthoCam : perspCam);
 
 function setMode(m) {
@@ -492,7 +547,9 @@ function setTool(t) {
   tool = t;
   document.querySelectorAll('#toolGroup button').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
   endChain();
+  cancelRoomPolygon();
   draw.calib = []; calibLine.visible = false;
+  updateDrawBar();
   canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
   rebuildHandles();
   updateHint();
@@ -705,6 +762,7 @@ function refreshAll() {
   rebuildFloor();
   rebuildPlan();
   rebuildWalls();
+  rebuildRooms();
   rebuildItems();
   renderVariantSelect();
   renderProps();
@@ -737,15 +795,18 @@ function select(s) {
   selection = s;
   updateSelectionHelper();
   rebuildWalls();
+  rebuildRooms();
   renderProps();
 }
 function deleteSelection() {
   if (!selection) return;
   pushUndo();
-  if (selection.kind === 'item') variant().items = items().filter(i => i.id !== selection.id);
-  else state.walls = state.walls.filter(w => w.id !== selection.id);
+  const kind = selection.kind, id = selection.id;
   selection = null;
-  rebuildItems(); rebuildWalls(); rebuildFloor(); renderProps();
+  if (kind === 'item') { variant().items = items().filter(i => i.id !== id); rebuildItems(); rebuildFloor(); }
+  else if (kind === 'room') { state.rooms = state.rooms.filter(r => r.id !== id); rebuildRooms(); }
+  else { state.walls = state.walls.filter(w => w.id !== id); wallsChanged(); }
+  renderProps();
   scheduleSave();
 }
 function duplicateSelection() {
@@ -782,8 +843,8 @@ function setWallLength(w, L) {
 }
 
 // Tür/Fenster: Wand an Klickstelle in drei Teile teilen
-function insertOpening(p, type) {
-  const tol = pxToM(12);
+function insertOpening(p, type, tolPx = 12) {
+  const tol = pxToM(tolPx);
   let best = null, bd = Infinity, bt = 0;
   for (const w of state.walls) {
     if (w.type !== 'wall') continue;
@@ -806,7 +867,7 @@ function insertOpening(p, type) {
   if (L - (c + width / 2) > 0.005) parts.push({ ...best, id: uid(), a: p2 });
   state.walls.splice(idx, 1, ...parts);
   selection = { kind: 'wall', id: op.id };
-  rebuildWalls(); renderProps(); scheduleSave();
+  wallsChanged(); renderProps(); scheduleSave();
 }
 function pointSegment(p, a, b) {
   const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
@@ -816,10 +877,10 @@ function pointSegment(p, a, b) {
 
 // Fangen an Wandenden und 45°-Winkeln, Länge auf cm gerundet
 let snapLabel = '';
-function snapPoint(raw, free, exclude = null) {
-  const tol = pxToM(12);
+function snapPoint(raw, free, exclude = null, chain = draw.chain, tolPx = 12) {
+  const tol = pxToM(tolPx);
   let best = null, bd = tol;
-  const cands = uniqueEndpoints().concat(draw.chain || []);
+  const cands = uniqueEndpoints().concat(chain || []);
   for (const q of cands) {
     if (exclude && samePt(q, exclude)) continue;
     const d = dist(raw, q);
@@ -827,7 +888,7 @@ function snapPoint(raw, free, exclude = null) {
   }
   snapLabel = '';
   if (best) { snapLabel = 'Endpunkt'; return { x: best.x, z: best.z }; }
-  const last = draw.chain && draw.chain[draw.chain.length - 1];
+  const last = chain && chain[chain.length - 1];
   if (!last) return { x: round2(raw.x), z: round2(raw.z) };
   let ang = Math.atan2(raw.z - last.z, raw.x - last.x);
   const L = Math.round(dist(raw, last) * 100) / 100;
@@ -846,13 +907,14 @@ function wallToolClick(raw, e) {
   state.walls.push(newWall(last, p));
   const closes = draw.chain.length > 1 && samePt(p, draw.chain[0]);
   draw.chain.push(p);
-  rebuildWalls(); rebuildFloor(); scheduleSave();
+  wallsChanged(); scheduleSave();
   if (closes) endChain();
 }
 function endChain() {
   draw.chain = null;
   previewLine.visible = false;
   snapMarker.visible = false;
+  updateDrawBar();
 }
 
 function calibrateClick(p) {
@@ -871,15 +933,280 @@ function calibrateClick(p) {
   state.plan.width *= f;
   for (const w of state.walls) { w.a = { x: w.a.x * f, z: w.a.z * f }; w.b = { x: w.b.x * f, z: w.b.z * f }; }
   for (const v of state.variants) for (const it of v.items) { it.x *= f; it.z *= f; }
+  for (const r of state.rooms) {
+    r.poly = r.poly.map(q => ({ x: q.x * f, z: q.z * f }));
+    if (r.seed) r.seed = { x: r.seed.x * f, z: r.seed.z * f };
+    r.area *= f * f;
+  }
   ortho.cx *= f; ortho.cz *= f; ortho.h *= f; updateOrtho();
+  redetectRooms();
   refreshAll();
   scheduleSave();
   setTool('select');
   flash(`Maßstab gesetzt (Faktor ${f.toFixed(3)}).`);
 }
 
+
 // ---------------------------------------------------------------------------
-// Maus / Tastatur
+// Räume: automatische Erkennung (Rasterung der Wände + Flutfüllung) oder Polygon
+// ---------------------------------------------------------------------------
+const ROOM_COLORS = ['#c9a77a', '#b9c4cf', '#e6dcc8', '#a8b5a0', '#d9b8a7', '#c7c0d6', '#9fb7c9'];
+const fmtArea = a => a.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const outlineMat = new THREE.LineBasicMaterial({ color: '#ff8a1f', depthTest: false });
+const labelsEl = $('#labels');
+let roomLabels = [];
+
+function wallsChanged() {
+  rebuildWalls();
+  rebuildFloor();
+  redetectRooms();
+}
+
+// Liefert für jeden Startpunkt { poly, area } oder { error }
+function detectRooms(seeds) {
+  if (!state.walls.length) return seeds.map(() => ({ error: 'Es sind noch keine Wände vorhanden.' }));
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, maxT = 0;
+  for (const w of state.walls) {
+    for (const q of [w.a, w.b]) { minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minZ = Math.min(minZ, q.z); maxZ = Math.max(maxZ, q.z); }
+    maxT = Math.max(maxT, w.t);
+  }
+  const pad = maxT + 0.1;
+  minX -= pad; minZ -= pad; maxX += pad; maxZ += pad;
+  minX -= 0.0037; minZ -= 0.0037; // Rasterversatz, damit Wandkanten nicht genau auf Zellmitten liegen
+  let cell = 0.01, W, H;
+  for (;;) {
+    W = Math.ceil((maxX - minX) / cell) + 1; H = Math.ceil((maxZ - minZ) / cell) + 1;
+    if (W * H <= 4e6) break;
+    cell *= 1.25;
+  }
+  // Wände (inkl. Tür-/Fensteröffnungen) als belegte Zellen eintragen
+  const base = new Uint8Array(W * H);
+  for (const w of state.walls) {
+    const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+    if (L < 1e-6) continue;
+    const ux = dx / L, uz = dz / L, half = Math.max(w.t / 2, cell * 1.5), r = half * 2;
+    const i0 = Math.max(0, Math.floor((Math.min(w.a.x, w.b.x) - r - minX) / cell)), i1 = Math.min(W - 1, Math.ceil((Math.max(w.a.x, w.b.x) + r - minX) / cell));
+    const j0 = Math.max(0, Math.floor((Math.min(w.a.z, w.b.z) - r - minZ) / cell)), j1 = Math.min(H - 1, Math.ceil((Math.max(w.a.z, w.b.z) + r - minZ) / cell));
+    for (let j = j0; j <= j1; j++) {
+      const rz = minZ + (j + 0.5) * cell - w.a.z;
+      for (let i = i0; i <= i1; i++) {
+        const rx = minX + (i + 0.5) * cell - w.a.x;
+        const along = rx * ux + rz * uz;
+        if (along < -half || along > L + half) continue;
+        if (Math.abs(rz * ux - rx * uz) <= half) base[j * W + i] = 1;
+      }
+    }
+  }
+  return seeds.map(s => {
+    const si = Math.floor((s.x - minX) / cell), sj = Math.floor((s.z - minZ) / cell);
+    if (si <= 0 || sj <= 0 || si >= W - 1 || sj >= H - 1) return { error: 'Dieser Punkt liegt außerhalb der Wände.' };
+    if (base[sj * W + si]) return { error: 'Bitte in den Raum tippen/klicken, nicht auf eine Wand.' };
+    const g = base.slice(), stack = new Int32Array(W * H);
+    let sp = 0, count = 0, open = false;
+    stack[sp++] = sj * W + si; g[sj * W + si] = 2;
+    while (sp) {
+      const k = stack[--sp], i = k % W, j = (k - i) / W;
+      count++;
+      if (i === 0 || j === 0 || i === W - 1 || j === H - 1) { open = true; break; }
+      for (const nb of [k - 1, k + 1, k - W, k + W]) if (g[nb] === 0) { g[nb] = 2; stack[sp++] = nb; }
+    }
+    if (open) return { error: 'Dieser Bereich ist nicht ringsum von Wänden umschlossen. Lücke schließen oder den Raum mit „Raum ✎“ von Hand zeichnen.' };
+    const raw = traceContour(g, W, H).map(([vx, vy]) => ({ x: minX + vx * cell, z: minZ + vy * cell }));
+    const poly = refinePolygon(simplifyClosed(raw, cell * 1.5), cell);
+    // Fläche aus dem exakten Umriss; eingeschlossene Wandstücke (z. B. Pfeiler) werden aus dem Raster abgezogen
+    const holes = Math.max(0, polygonArea(raw) - count * cell * cell);
+    return { poly, area: Math.max(0, polygonArea(poly) - holes) };
+  });
+}
+
+// Kanten des Raster-Umrisses auf die tatsächlichen Wandflächen legen (exakte Fläche statt Rastergenauigkeit)
+function refinePolygon(poly, cell) {
+  const lines = [];
+  for (const w of state.walls) {
+    const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+    if (L < 1e-6) continue;
+    const ux = dx / L, uz = dz / L, nx = -uz, nz = ux, h = Math.max(w.t / 2, cell * 1.5);
+    lines.push({ x: w.a.x + nx * h, z: w.a.z + nz * h, ux, uz }, { x: w.a.x - nx * h, z: w.a.z - nz * h, ux, uz },
+      { x: w.a.x - ux * h, z: w.a.z - uz * h, ux: nx, uz: nz }, { x: w.b.x + ux * h, z: w.b.z + uz * h, ux: nx, uz: nz });
+  }
+  const n = poly.length, edges = [];
+  for (let i = 0; i < n; i++) {
+    const A = poly[i], Bp = poly[(i + 1) % n], len = dist(A, Bp);
+    const ux = (Bp.x - A.x) / len, uz = (Bp.z - A.z) / len, mx = (A.x + Bp.x) / 2, mz = (A.z + Bp.z) / 2;
+    let best = { x: A.x, z: A.z, ux, uz }, bd = cell * 2.5;
+    for (const l of lines) {
+      if (Math.abs(ux * l.uz - uz * l.ux) > 0.05) continue;
+      const d = Math.abs((mx - l.x) * l.uz - (mz - l.z) * l.ux);
+      if (d < bd) { bd = d; best = l; }
+    }
+    edges.push(best);
+  }
+  return poly.map((p, i) => {
+    const l1 = edges[(i - 1 + n) % n], l2 = edges[i], den = l1.ux * l2.uz - l1.uz * l2.ux;
+    if (Math.abs(den) < 1e-6) return p;
+    const t = ((l2.x - l1.x) * l2.uz - (l2.z - l1.z) * l2.ux) / den;
+    const q = { x: l1.x + l1.ux * t, z: l1.z + l1.uz * t };
+    return dist(q, p) < cell * 4 ? q : p;
+  });
+}
+
+// Umriss der gefüllten Zellen (Wert 2) entlang der Zellkanten verfolgen
+function traceContour(g, W, H) {
+  let start = -1;
+  for (let k = 0; k < g.length; k++) if (g[k] === 2) { start = k; break; }
+  const filled = (x, y) => x >= 0 && y >= 0 && x < W && y < H && g[y * W + x] === 2;
+  const quad = (vx, vy, sx, sy) => filled(vx + (sx > 0 ? 0 : -1), vy + (sy > 0 ? 0 : -1));
+  const x0 = start % W, y0 = (start - x0) / W, pts = [];
+  let vx = x0, vy = y0, dx = 1, dy = 0, first = true, guard = 0;
+  while (guard++ < 2e7) {
+    const lx = dy, ly = -dx;
+    let nx, ny;
+    if (quad(vx, vy, dx + lx, dy + ly)) { nx = lx; ny = ly; }
+    else if (quad(vx, vy, dx - lx, dy - ly)) { nx = dx; ny = dy; }
+    else { nx = -lx; ny = -ly; }
+    const turn = nx !== dx || ny !== dy;
+    if (!first && vx === x0 && vy === y0 && nx === 1 && ny === 0) { if (turn) pts.push([vx, vy]); break; }
+    if (turn) pts.push([vx, vy]);
+    first = false;
+    dx = nx; dy = ny; vx += dx; vy += dy;
+  }
+  return pts;
+}
+function simplifyOpen(pts, eps) {
+  if (pts.length < 3) return pts;
+  const a = pts[0], b = pts[pts.length - 1];
+  let idx = -1, md = 0;
+  for (let i = 1; i < pts.length - 1; i++) { const d = pointSegment(pts[i], a, b).d; if (d > md) { md = d; idx = i; } }
+  if (md <= eps) return [a, b];
+  return simplifyOpen(pts.slice(0, idx + 1), eps).slice(0, -1).concat(simplifyOpen(pts.slice(idx), eps));
+}
+function simplifyClosed(pts, eps) {
+  if (pts.length < 4) return pts;
+  let far = 0, fd = -1;
+  pts.forEach((q, i) => { const d = dist(pts[0], q); if (d > fd) { fd = d; far = i; } });
+  const a = simplifyOpen(pts.slice(0, far + 1), eps), b = simplifyOpen(pts.slice(far).concat([pts[0]]), eps);
+  return a.slice(0, -1).concat(b.slice(0, -1));
+}
+function polygonArea(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; a += p.x * q.z - q.x * p.z; }
+  return Math.abs(a) / 2;
+}
+function polygonCentroid(poly) {
+  let a = 0, cx = 0, cz = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length], f = p.x * q.z - q.x * p.z;
+    a += f; cx += (p.x + q.x) * f; cz += (p.z + q.z) * f;
+  }
+  return Math.abs(a) < 1e-9 ? poly[0] : { x: cx / (3 * a), z: cz / (3 * a) };
+}
+function pointInPoly(p, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.z > p.z) !== (b.z > p.z) && p.x < ((b.x - a.x) * (p.z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+  }
+  return inside;
+}
+function roomAt(p) {
+  return state.rooms.filter(r => pointInPoly(p, r.poly)).sort((a, b) => a.area - b.area)[0] || null;
+}
+
+function newRoom(poly, area, seed) {
+  const n = state.rooms.length;
+  return { id: uid(), name: `Raum ${n + 1}`, color: ROOM_COLORS[n % ROOM_COLORS.length], poly, area, seed, stale: false };
+}
+function addRoomAt(p) {
+  const existing = state.rooms.find(r => r.seed && pointInPoly(p, r.poly));
+  if (existing) { select({ kind: 'room', id: existing.id }); flash('Hier gibt es schon einen Raum.'); return; }
+  const res = detectRooms([p])[0];
+  if (res.error) { flash(res.error); return; }
+  pushUndo();
+  const r = newRoom(res.poly, res.area, { ...p });
+  state.rooms.push(r);
+  select({ kind: 'room', id: r.id });
+  scheduleSave();
+}
+function redetectRooms() {
+  const auto = state.rooms.filter(r => r.seed);
+  if (!auto.length) return;
+  const res = detectRooms(auto.map(r => r.seed));
+  auto.forEach((r, i) => {
+    if (res[i].error) r.stale = true;
+    else Object.assign(r, { poly: res[i].poly, area: res[i].area, stale: false });
+  });
+  rebuildRooms();
+  if (!selection || selection.kind === 'room') renderProps();
+}
+
+function roomDrawClick(raw, e) {
+  const p = snapPoint(raw, e.shiftKey, null, draw.room, e.pointerType === 'touch' ? 20 : 12);
+  if (!draw.room) draw.room = [];
+  const pts = draw.room;
+  if (pts.length >= 3 && samePt(p, pts[0])) return finishRoomPolygon();
+  if (pts.length && dist(p, pts[pts.length - 1]) < 0.01) return finishRoomPolygon();
+  pts.push(p);
+  setPolyline(roomPreview, pts);
+  updateDrawBar();
+}
+function finishRoomPolygon() {
+  const pts = draw.room || [];
+  cancelRoomPolygon();
+  if (pts.length < 3) { if (pts.length) flash('Ein Raum braucht mindestens 3 Ecken.'); return; }
+  const area = polygonArea(pts);
+  if (area < 0.05) { flash('Die Fläche ist zu klein.'); return; }
+  pushUndo();
+  const r = newRoom(pts, area, null);
+  state.rooms.push(r);
+  select({ kind: 'room', id: r.id });
+  scheduleSave();
+}
+function cancelRoomPolygon() {
+  draw.room = null;
+  roomPreview.visible = false;
+  snapMarker.visible = false;
+  updateDrawBar();
+}
+
+function rebuildRooms() {
+  disposeGroup(roomsGroup);
+  labelsEl.innerHTML = '';
+  roomLabels = [];
+  for (const r of state.rooms) {
+    const color = roomColor(r);
+    const shape = new THREE.Shape(r.poly.map(q => new THREE.Vector2(q.x, -q.z)));
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(shape),
+      mode === '2d' ? mat(color, { transparent: true, opacity: 0.55, depthWrite: false }) : mat(color, { roughness: 0.9 }));
+    m.rotation.x = -Math.PI / 2;
+    m.position.y = 0.003;
+    m.receiveShadow = true;
+    m.userData.roomId = r.id;
+    roomsGroup.add(m);
+    if (selection?.kind === 'room' && selection.id === r.id) {
+      const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(r.poly.map(q => new THREE.Vector3(q.x, mode === '2d' ? 3.15 : 0.02, q.z))), outlineMat);
+      line.renderOrder = 9;
+      roomsGroup.add(line);
+    }
+    const el = document.createElement('div');
+    el.className = 'room-label';
+    el.innerHTML = `<b>${esc(r.name)}</b><br>${fmtArea(r.area)} m²${r.stale ? ' <span class="warn">⚠</span>' : ''}`;
+    labelsEl.appendChild(el);
+    const c = r.seed || polygonCentroid(r.poly);
+    roomLabels.push({ el, pos: new THREE.Vector3(c.x, 0.05, c.z) });
+  }
+}
+function updateLabels() {
+  const w = canvas.clientWidth, h = canvas.clientHeight, v = new THREE.Vector3();
+  for (const l of roomLabels) {
+    v.copy(l.pos).project(camera());
+    const show = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    l.el.style.display = show ? '' : 'none';
+    if (show) l.el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -50%)`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Maus / Touch / Tastatur
 // ---------------------------------------------------------------------------
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -906,8 +1233,8 @@ function hitWall3d(e) {
   const hit = raycaster.intersectObjects(wallsGroup.children, true)[0];
   return hit ? hit.object.userData.wallId : null;
 }
-function nearestWall2d(p) {
-  const tol = pxToM(8);
+function nearestWall2d(p, tolPx = 8) {
+  const tol = pxToM(tolPx);
   let best = null, bd = Infinity;
   for (const w of state.walls) {
     const { d } = pointSegment(p, w.a, w.b);
@@ -916,8 +1243,25 @@ function nearestWall2d(p) {
   return best;
 }
 
-let drag = null;
+function hitRoom3d(e) {
+  setRay(e);
+  const hit = raycaster.intersectObjects(roomsGroup.children.filter(o => o.isMesh), false)[0];
+  return hit ? hit.object.userData.roomId : null;
+}
+
+// Gesten: ein Zeiger (Maus / ein Finger) = Werkzeug bzw. Ziehen, zwei Finger = Verschieben + Zoomen (2D)
+const pointers = new Map();
+let drag = null, pinch = null, gesture = null;
+
 function onPointerDown(e) {
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size >= 2) {
+    abortGesture();
+    if (mode === '2d' && pointers.size === 2) pinch = pinchState();
+    controls.enabled = mode === '3d';
+    return;
+  }
+  const touch = e.pointerType === 'touch';
   const p = groundPoint(e);
   if (mode === '2d' && (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey))) {
     drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, cx: ortho.cx, cz: ortho.cz };
@@ -928,36 +1272,97 @@ function onPointerDown(e) {
   if (mode === '3d') {
     const id = hitItem(e);
     if (id) { startItemDrag(id, p); controls.enabled = false; return; }
-    drag = { kind: 'click3d', sx: e.clientX, sy: e.clientY, wallId: hitWall3d(e) };
+    drag = { kind: 'click3d', sx: e.clientX, sy: e.clientY, wallId: hitWall3d(e), roomId: hitRoom3d(e) };
     return;
   }
 
-  if (tool === 'wall') return wallToolClick(p, e);
-  if (tool === 'door' || tool === 'window') return insertOpening(p, tool);
-  if (tool === 'calibrate') return calibrateClick(p);
+  if (tool !== 'select') {
+    // Werkzeug-Aktion beim Loslassen; so kann der Finger den Punkt vorher genau positionieren
+    gesture = { sx: e.clientX, sy: e.clientY, cancelled: false, timer: null };
+    if (touch && (tool === 'wall' || tool === 'roomdraw')) {
+      gesture.timer = setTimeout(() => {
+        if (!gesture) return;
+        gesture.cancelled = true;
+        tool === 'wall' ? endChain() : finishRoomPolygon();
+      }, 650);
+    }
+    updatePreview(p, e);
+    return;
+  }
 
-  const tol = pxToM(9);
-  const ep = uniqueEndpoints().find(q => dist(q, p) < tol);
+  const ep = uniqueEndpoints().find(q => dist(q, p) < pxToM(touch ? 20 : 9));
   if (ep) { drag = { kind: 'endpoint', from: { ...ep }, cur: { ...ep }, moved: false }; return; }
   const id = hitItem(e);
   if (id) return startItemDrag(id, p);
-  const w = nearestWall2d(p);
+  const w = nearestWall2d(p, touch ? 14 : 8);
   if (w) return select({ kind: 'wall', id: w.id });
-  if (selection) select(null);
-  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, cx: ortho.cx, cz: ortho.cz };
+  const room = roomAt(p);
+  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, cx: ortho.cx, cz: ortho.cz, tap: true, roomId: room ? room.id : null };
 }
 function startItemDrag(id, p) {
   const it = getItem(id);
   if (!(selection?.kind === 'item' && selection.id === id)) select({ kind: 'item', id });
   drag = { kind: 'item', id, ox: it.x - p.x, oz: it.z - p.z, moved: false };
 }
+function finishDrag(d) {
+  if (d.kind === 'item' && d.moved) { renderProps(); rebuildFloor(); scheduleSave(); }
+  if (d.kind === 'endpoint' && d.moved) { wallsChanged(); renderProps(); scheduleSave(); }
+}
+function abortGesture() {
+  if (gesture) { clearTimeout(gesture.timer); gesture = null; }
+  if (drag) { const d = drag; drag = null; finishDrag(d); }
+}
+function pinchState() {
+  const [a, b] = [...pointers.values()];
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+}
+function updatePinch() {
+  const cur = pinchState();
+  const before = groundPoint({ clientX: pinch.cx, clientY: pinch.cy });
+  ortho.h = Math.min(200, Math.max(1, (ortho.h * pinch.d) / cur.d));
+  updateOrtho();
+  const after = groundPoint({ clientX: cur.cx, clientY: cur.cy });
+  if (before && after) { ortho.cx += before.x - after.x; ortho.cz += before.z - after.z; updateOrtho(); }
+  pinch = cur;
+}
+function updatePreview(p, e) {
+  if (tool === 'wall' || tool === 'roomdraw') {
+    const chain = tool === 'wall' ? draw.chain : draw.room;
+    const sp = snapPoint(p, e.shiftKey, null, chain, e.pointerType === 'touch' ? 20 : 12);
+    snapMarker.visible = !!snapLabel;
+    snapMarker.position.set(sp.x, 3.2, sp.z);
+    snapMarker.scale.setScalar(pxToM(7));
+    if (chain && chain.length) {
+      const last = chain[chain.length - 1];
+      if (tool === 'wall') setLine(previewLine, last, sp); else setPolyline(roomPreview, [...chain, sp]);
+      updateHint(`Länge: ${(dist(last, sp) * 100).toFixed(0)} cm${snapLabel ? ' · Fang: ' + snapLabel : ''}`);
+    }
+  }
+  if (tool === 'calibrate' && draw.calib.length === 1) {
+    setLine(calibLine, draw.calib[0], p);
+    updateHint(`Strecke: ${(dist(draw.calib[0], p) * 100).toFixed(0)} cm (aktueller Maßstab)`);
+  }
+}
+function toolAction(p, e) {
+  if (tool === 'wall') wallToolClick(p, e);
+  else if (tool === 'door' || tool === 'window') insertOpening(p, tool, e.pointerType === 'touch' ? 20 : 12);
+  else if (tool === 'calibrate') calibrateClick(p);
+  else if (tool === 'room') addRoomAt(p);
+  else if (tool === 'roomdraw') roomDrawClick(p, e);
+  updateDrawBar();
+}
 
 window.addEventListener('pointermove', e => {
+  const pt = pointers.get(e.pointerId);
+  if (pt) { pt.x = e.clientX; pt.y = e.clientY; }
+  if (pinch) { if (pointers.size >= 2) updatePinch(); return; }
   const inCanvas = e.target === canvas;
-  const p = inCanvas || drag ? groundPoint(e) : null;
+  const p = inCanvas || drag || gesture ? groundPoint(e) : null;
   if (p && inCanvas) $('#coords').textContent = `x ${(p.x * 100).toFixed(0)} cm · y ${(p.z * 100).toFixed(0)} cm`;
+  if (gesture && Math.hypot(e.clientX - gesture.sx, e.clientY - gesture.sy) > 10) clearTimeout(gesture.timer);
 
   if (drag?.kind === 'pan') {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) drag.tap = false;
     const m = ortho.h / viewportEl.clientHeight;
     ortho.cx = drag.cx - (e.clientX - drag.sx) * m;
     ortho.cz = drag.cz - (e.clientY - drag.sy) * m;
@@ -974,40 +1379,39 @@ window.addEventListener('pointermove', e => {
     return;
   }
   if (drag?.kind === 'endpoint' && p) {
-    const np = snapPoint(p, true, drag.from);
+    const np = snapPoint(p, true, drag.from, null);
     if (!drag.moved) { pushUndo(); drag.moved = true; }
     moveEndpoint(drag.cur, np);
     drag.cur = np;
     rebuildWalls();
     return;
   }
-  if (mode === '2d' && tool === 'wall' && p) {
-    const sp = snapPoint(p, e.shiftKey);
-    snapMarker.visible = !!snapLabel;
-    snapMarker.position.set(sp.x, 3.2, sp.z);
-    snapMarker.scale.setScalar(pxToM(7));
-    if (draw.chain) {
-      const last = draw.chain[draw.chain.length - 1];
-      setLine(previewLine, last, sp);
-      updateHint(`Länge: ${(dist(last, sp) * 100).toFixed(0)} cm${snapLabel ? ' · Fang: ' + snapLabel : ''}`);
-    }
-  }
-  if (mode === '2d' && tool === 'calibrate' && draw.calib.length === 1 && p) {
-    setLine(calibLine, draw.calib[0], p);
-    updateHint(`Strecke: ${(dist(draw.calib[0], p) * 100).toFixed(0)} cm (aktueller Maßstab)`);
-  }
+  if (mode === '2d' && p && (inCanvas || gesture)) updatePreview(p, e);
 });
-window.addEventListener('pointerup', e => {
+function onPointerUp(e) {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.delete(e.pointerId);
+  if (pinch) { if (pointers.size < 2) pinch = null; return; }
+  const cancelled = e.type === 'pointercancel';
+  if (gesture) {
+    const g = gesture;
+    gesture = null;
+    clearTimeout(g.timer);
+    const p = groundPoint(e);
+    if (!g.cancelled && !cancelled && p) toolAction(p, e);
+    return;
+  }
   if (!drag) return;
   const d = drag;
   drag = null;
   controls.enabled = mode === '3d';
-  if (d.kind === 'item' && d.moved) { renderProps(); rebuildFloor(); scheduleSave(); }
-  if (d.kind === 'endpoint' && d.moved) { rebuildFloor(); renderProps(); scheduleSave(); }
-  if (d.kind === 'click3d' && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) {
-    select(d.wallId ? { kind: 'wall', id: d.wallId } : null);
-  }
-});
+  finishDrag(d);
+  if (cancelled || Math.hypot(e.clientX - d.sx, e.clientY - d.sy) >= 6) return;
+  if (d.kind === 'click3d') select(d.wallId ? { kind: 'wall', id: d.wallId } : d.roomId ? { kind: 'room', id: d.roomId } : null);
+  if (d.kind === 'pan' && d.tap) select(d.roomId ? { kind: 'room', id: d.roomId } : null);
+}
+window.addEventListener('pointerup', onPointerUp);
+window.addEventListener('pointercancel', onPointerUp);
 canvas.addEventListener('dblclick', () => { if (tool === 'wall') endChain(); });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('wheel', e => {
@@ -1020,6 +1424,22 @@ canvas.addEventListener('wheel', e => {
   if (before && after) { ortho.cx += before.x - after.x; ortho.cz += before.z - after.z; updateOrtho(); }
 }, { passive: false });
 
+// Schaltflächen „Fertig“ / „Abbrechen“ während des Zeichnens (v. a. für Touch)
+function updateDrawBar() {
+  const show = (tool === 'wall' && draw.chain) || (tool === 'roomdraw' && draw.room && draw.room.length) || (tool === 'calibrate' && draw.calib.length);
+  $('#drawBar').style.display = show ? 'flex' : 'none';
+}
+$('#drawDone').onclick = () => {
+  if (tool === 'roomdraw') finishRoomPolygon(); else if (tool === 'wall') endChain();
+  else { draw.calib = []; calibLine.visible = false; }
+  updateDrawBar();
+};
+$('#drawCancel').onclick = () => {
+  if (tool === 'roomdraw') cancelRoomPolygon(); else if (tool === 'wall') endChain();
+  else { draw.calib = []; calibLine.visible = false; }
+  updateDrawBar();
+};
+
 window.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
@@ -1029,7 +1449,12 @@ window.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicateSelection(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSelection(); }
-  else if (k === 'escape' || k === 'enter') { if (draw.chain) endChain(); else if (k === 'escape') { draw.calib = []; calibLine.visible = false; select(null); } }
+  else if (k === 'enter') { if (draw.chain) endChain(); else if (draw.room) finishRoomPolygon(); }
+  else if (k === 'escape') {
+    if (draw.chain) endChain();
+    else if (draw.room) cancelRoomPolygon();
+    else { draw.calib = []; calibLine.visible = false; updateDrawBar(); select(null); }
+  }
   else if (k === 'r') rotateSelection(e.shiftKey ? 15 : 90);
   else if (mode === '2d' && k === 'v') setTool('select');
   else if (mode === '2d' && k === 'w') setTool('wall');
@@ -1045,7 +1470,12 @@ function renderCatalog() {
   for (const [k, d] of Object.entries(CATALOG)) (groups[d.group] ||= []).push([k, d]);
   $('#catalog').innerHTML = Object.entries(groups).map(([g, list]) =>
     `<div class="cat-group">${g}</div><div class="catalog">${list.map(([k, d]) => `<button data-add="${k}" title="${cmTxt(d.w)} × ${cmTxt(d.d)} × ${cmTxt(d.h)} cm">${d.label}</button>`).join('')}</div>`).join('');
-  $('#catalog').addEventListener('click', e => { const b = e.target.closest('[data-add]'); if (b) addItem(b.dataset.add); });
+  $('#catalog').addEventListener('click', e => {
+    const b = e.target.closest('[data-add]');
+    if (!b) return;
+    addItem(b.dataset.add);
+    if (narrow()) document.body.classList.remove('panel-open');
+  });
 }
 const cmTxt = v => Math.round(v * 100);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1130,12 +1560,38 @@ function renderProps() {
         if (!(v >= 0) || (f !== 'sill' && v === 0)) { undoStack.pop(); return renderProps(); }
         if (f === 'len') setWallLength(w, v); else w[f] = v;
       }
-      rebuildWalls(); rebuildFloor(); renderProps(); scheduleSave();
+      wallsChanged(); renderProps(); scheduleSave();
     }));
     return;
   }
+  if (selection?.kind === 'room') {
+    const r = getRoom(selection.id);
+    if (!r) { selection = null; return renderProps(); }
+    el.innerHTML = `
+      <h3>Raum</h3>
+      <label>Name<input type="text" id="rName" value="${esc(r.name)}"></label>
+      <label>Bodenfarbe (Variante „${esc(variant().name)}“)<input type="color" id="rColor" value="${roomColor(r)}"></label>
+      <p><b>Fläche: ${fmtArea(r.area)} m²</b><br>
+        <span class="hint">${r.seed ? 'Innenfläche bis zur Wandinnenseite, automatisch aus den Wänden ermittelt. Passt sich an, wenn du Wände änderst.' : 'Von Hand gezeichnetes Polygon; Fläche der gezeichneten Form.'}</span></p>
+      ${r.stale ? '<p class="warn">Der Raum ist zurzeit nicht ringsum von Wänden umschlossen. Angezeigt wird die letzte gültige Fläche.</p>' : ''}
+      <div class="row">${r.seed ? '<button id="rDetect">Neu erkennen</button>' : ''}<button id="pDel" class="danger">Löschen</button></div>
+      <p class="hint">Hinweis: Das ist keine Wohnflächenberechnung nach Wohnflächenverordnung (z.&nbsp;B. ohne Abzüge für Dachschrägen).</p>`;
+    el.querySelector('#rName').onchange = e => { pushUndo(); r.name = e.target.value.trim() || r.name; rebuildRooms(); renderProps(); scheduleSave(); };
+    el.querySelector('#rColor').onchange = e => { pushUndo(); variant().roomColors[r.id] = e.target.value; rebuildRooms(); scheduleSave(); };
+    el.querySelector('#pDel').onclick = deleteSelection;
+    const det = el.querySelector('#rDetect');
+    if (det) det.onclick = () => { redetectRooms(); renderProps(); scheduleSave(); if (r.stale) flash('Raum ist nicht geschlossen.'); };
+    return;
+  }
   const s = state.settings;
-  el.innerHTML = `
+  const total = state.rooms.reduce((a, r) => a + r.area, 0);
+  const roomsHtml = state.rooms.length ? `
+    <h3 style="margin-top:10px">Räume</h3>
+    <table class="rooms">
+      ${state.rooms.map(r => `<tr data-room="${r.id}"><td><span class="swatch" style="background:${roomColor(r)}"></span>${esc(r.name)}${r.stale ? ' <span class="warn">⚠</span>' : ''}</td><td>${fmtArea(r.area)} m²</td></tr>`).join('')}
+      <tr class="sum"><td>Summe</td><td>${fmtArea(total)} m²</td></tr>
+    </table>` : '';
+  el.innerHTML = `${roomsHtml}
     <p class="hint">Nichts ausgewählt. Standardwerte für neue Wände, Türen und Fenster:</p>
     <div class="grid2">
       ${numField('Wandhöhe (cm)', 'wallHeight', cmTxt(s.wallHeight))}
@@ -1147,8 +1603,8 @@ function renderProps() {
       ${numField('Fenster-Oberkante (cm)', 'windowTop', cmTxt(s.windowTop))}
     </div>
     <div class="row"><button id="applyHeight">Wandhöhe auf alle Wände anwenden</button></div>
-    <label>Bodenfarbe <input type="color" id="floorColor" value="${s.floorColor}"></label>
-    <p class="hint"><b>So geht's:</b> 1. Grundriss-Bild laden. 2. „Maßstab“: zwei Punkte mit bekanntem Abstand anklicken und echte Länge eingeben. 3. „Wand“: Wände nachzeichnen. 4. „Tür“/„Fenster“: auf Wände klicken. 5. Möbel aus der Liste hinzufügen und verschieben; über „Ersetzen durch“ austauschen. Varianten für verschiedene Einrichtungen anlegen.</p>`;
+    <label>Bodenfarbe außerhalb von Räumen <input type="color" id="floorColor" value="${s.floorColor}"></label>
+    <p class="hint"><b>So geht's:</b> 1. Grundriss-Bild laden. 2. „Maßstab“: zwei Punkte mit bekanntem Abstand anklicken und echte Länge eingeben. 3. „Wand“: Wände nachzeichnen. 4. „Tür“/„Fenster“: auf Wände klicken. 5. „Raum“: in jeden Raum klicken – Fläche und Bodenfarbe erscheinen. 6. Möbel aus der Liste hinzufügen und verschieben; über „Ersetzen durch“ austauschen. 7. Varianten für verschiedene Einrichtungen anlegen.</p>`;
   el.querySelectorAll('[data-f]').forEach(inp => (inp.onchange = () => {
     const v = parseFloat(String(inp.value).replace(',', '.')) / 100;
     if (!(v >= 0)) return renderProps();
@@ -1161,6 +1617,7 @@ function renderProps() {
     state.walls.forEach(w => (w.h = s.wallHeight));
     rebuildWalls(); scheduleSave();
   };
+  el.querySelectorAll('tr[data-room]').forEach(tr => (tr.onclick = () => select({ kind: 'room', id: tr.dataset.room })));
   el.querySelector('#floorColor').onchange = e => { pushUndo(); s.floorColor = e.target.value; rebuildFloor(); scheduleSave(); };
 }
 
@@ -1171,12 +1628,12 @@ function renderVariantSelect() {
   $('#variantSelect').innerHTML = state.variants.map(v => `<option value="${v.id}" ${v.id === state.activeVariant ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
   $('#variantDelete').disabled = state.variants.length < 2;
 }
-$('#variantSelect').onchange = e => { state.activeVariant = e.target.value; selection = null; rebuildItems(); rebuildFloor(); renderProps(); scheduleSave(); };
+$('#variantSelect').onchange = e => { state.activeVariant = e.target.value; selection = null; rebuildItems(); rebuildRooms(); rebuildFloor(); renderProps(); scheduleSave(); };
 $('#variantNew').onclick = () => {
   const name = prompt('Name der neuen Variante:', `Variante ${state.variants.length + 1}`);
   if (!name) return;
   pushUndo();
-  const v = { id: uid(), name, items: items().map(it => ({ ...it, id: uid() })) };
+  const v = { id: uid(), name, items: items().map(it => ({ ...it, id: uid() })), roomColors: { ...variant().roomColors } };
   state.variants.push(v);
   state.activeVariant = v.id;
   selection = null;
@@ -1266,6 +1723,8 @@ $('#resetAll').onclick = () => {
   selection = null;
   refreshAll(); fitView(); saveNow();
 };
+$('#panelToggle').onclick = () => document.body.classList.toggle('panel-open');
+const narrow = () => window.matchMedia('(max-width: 900px)').matches;
 $('#undo').onclick = undo;
 $('#redo').onclick = redo;
 $('#view2d').onclick = () => setMode('2d');
@@ -1280,13 +1739,15 @@ let flashMsg = '', flashTimer = null;
 function flash(msg) { flashMsg = msg; clearTimeout(flashTimer); flashTimer = setTimeout(() => { flashMsg = ''; updateHint(); }, 5000); updateHint(); }
 function updateHint(extra) {
   const hints = {
-    select: 'Klicken: auswählen · Möbel/Wandecken ziehen · freie Fläche ziehen, rechte Maustaste oder Alt+Ziehen: verschieben · Mausrad: Zoom',
-    wall: 'Klicken setzt Wandpunkte · Doppelklick, Enter oder Esc beendet · Shift: ohne Winkelfang',
+    select: 'Klicken/Tippen: auswählen · Möbel/Wandecken ziehen · freie Fläche ziehen, rechte Maustaste oder 2 Finger: verschieben · Mausrad/2 Finger: Zoom',
+    wall: 'Klicken/Tippen setzt Wandpunkte · Doppelklick, Enter, langes Tippen oder „Fertig“ beendet · Shift: ohne Winkelfang',
     door: `Auf eine Wand klicken, um eine Tür (${cmTxt(state.settings.doorWidth)} cm) einzusetzen`,
     window: `Auf eine Wand klicken, um ein Fenster (${cmTxt(state.settings.windowWidth)} cm) einzusetzen`,
     calibrate: 'Zwei Punkte mit bekanntem Abstand anklicken (z. B. Enden einer bemaßten Wand)',
+    room: 'In einen von Wänden umschlossenen Raum klicken/tippen – Raum und Fläche werden erkannt',
+    roomdraw: 'Raumecken setzen · ersten Punkt erneut, Doppelklick, Enter oder „Fertig“ schließt den Raum',
   };
-  const base = mode === '3d' ? 'Linke Maustaste: drehen · rechte: verschieben · Mausrad: Zoom · Möbel anklicken und ziehen' : hints[tool];
+  const base = mode === '3d' ? 'Linke Maustaste/1 Finger: drehen · rechte Maustaste/2 Finger: verschieben + Zoom · Möbel anklicken und ziehen' : hints[tool];
   const el = $('#hint');
   el.innerHTML = saveWarning ? `<span class="warn">${esc(saveWarning)}</span>` : esc(flashMsg || extra || base);
 }
@@ -1306,6 +1767,7 @@ renderer.setAnimationLoop(() => {
   if (mode === '3d') controls.update();
   if (mode === '2d') { const s = pxToM(9); handlesGroup.children.forEach(h => h.scale.set(s, s, 1)); }
   renderer.render(scene, camera());
+  updateLabels();
 });
 
 // für automatisierte Tests
