@@ -17,6 +17,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
    Unter „Eigenschaften“ vergibst du Name und Bodenfarbe. Angezeigt wird die **Innenfläche** bis zur Wandinnenseite. Ändern sich die Wände, wird der Raum automatisch neu berechnet.
    Ist ein Bereich nicht geschlossen, zeichnest du ihn mit **„Raum ✎“** als Polygon von Hand. Ecken setzen, dann schließen per Klick auf den ersten Punkt, Doppelklick, Enter oder „Fertig“.
    Ohne Auswahl zeigt die Seitenleiste eine Übersicht aller Räume mit Summe.
+   **Innenmaße ändern:** Beim ausgewählten Raum trägst du Breite und Tiefe in cm ein. Vorher wählst du, welche Wand sich bewegt: rechts oder links bzw. unten oder oben, wie im 2D-Grundriss. Türen und Fenster wandern mit ihrer Wand, Möbel bleiben stehen. Das funktioniert bei rechteckigen, gerade ausgerichteten Räumen. Andere Formen änderst du über die Wandecken.
    **Oberflächen:** Beim ausgewählten Raum stellst du **Boden** und **Wände des Raums** ein. Zur Wahl stehen Vorlagen und eigene Werte:
    - Boden: Holz/Laminat-Dielen (Breite, Länge, Verlegung längs oder quer), Fliesen (Größe, Fugenfarbe, gerade oder diagonal), Teppichboden, Beton/Estrich, einfarbig
    - Wände: Farbe/Putz, Tapete gestreift, Holzpaneele, Klinker, Fliesen, Sichtbeton

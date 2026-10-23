@@ -1673,6 +1673,43 @@ function numField(label, field, value, attrs = 'min="1"') {
   return `<label>${label}<input type="number" data-f="${field}" value="${value}" ${attrs}></label>`;
 }
 
+// Innenmaße rechteckiger, achsparalleler Räume ändern, indem eine Wandseite verschoben wird
+let resizeSide = { x: 'max', z: 'max' }; // welche Wand sich bewegt: 'max' = rechts/unten, 'min' = links/oben
+function roomRect(r) {
+  if (r.poly.length !== 4) return null;
+  const xs = r.poly.map(p => p.x), zs = r.poly.map(p => p.z);
+  const rc = { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+  const ok = r.poly.every(p => (Math.abs(p.x - rc.minX) < 1e-3 || Math.abs(p.x - rc.maxX) < 1e-3) && (Math.abs(p.z - rc.minZ) < 1e-3 || Math.abs(p.z - rc.maxZ) < 1e-3));
+  return ok ? rc : null;
+}
+function resizeRoom(r, axis, size, side) {
+  const rc = roomRect(r);
+  if (!rc) return;
+  const other = axis === 'x' ? 'z' : 'x';
+  const lo = axis === 'x' ? rc.minX : rc.minZ, hi = axis === 'x' ? rc.maxX : rc.maxZ;
+  const olo = axis === 'x' ? rc.minZ : rc.minX, ohi = axis === 'x' ? rc.maxZ : rc.maxX;
+  const delta = size - (hi - lo), edge = side === 'max' ? hi : lo, sign = side === 'max' ? 1 : -1;
+  if (Math.abs(delta) < 1e-4) return;
+  // Wandteile dieser Raumseite: parallel zur Seite, Wandachse um die halbe Dicke außerhalb der Innenkante
+  const pts = [];
+  for (const w of state.walls) {
+    if (Math.abs(w.a[axis] - w.b[axis]) > 1e-4 || Math.abs(w.a[axis] - (edge + (sign * w.t) / 2)) > 0.01) continue;
+    const s0 = Math.min(w.a[other], w.b[other]), s1 = Math.max(w.a[other], w.b[other]);
+    if (s1 < olo - w.t || s0 > ohi + w.t) continue;
+    for (const p of [w.a, w.b]) if (!pts.some(q => samePt(q, p))) pts.push({ ...p });
+  }
+  if (r.seed && !pts.length) { flash('Zu dieser Raumseite wurde keine passende Wand gefunden.'); return; }
+  pushUndo();
+  for (const p of pts) moveEndpoint(p, { ...p, [axis]: p[axis] + sign * delta });
+  r.poly = r.poly.map(p => (Math.abs(p[axis] - edge) < 1e-3 ? { ...p, [axis]: p[axis] + sign * delta } : p));
+  r.area = polygonArea(r.poly);
+  if (r.seed) r.seed = polygonCentroid(r.poly);
+  wallsChanged();
+  rebuildRooms();
+  renderProps();
+  scheduleSave();
+}
+
 // Material-Editor: Vorlage, Art, Farbe(n), Größe, Richtung, Oberfläche
 function matEditorHtml(id, spec, kind) {
   const types = kind === 'floor' ? FLOOR_TYPES : WALL_TYPES, presets = kind === 'floor' ? FLOOR_PRESETS : WALL_PRESETS;
@@ -1818,6 +1855,19 @@ function renderProps() {
     el.innerHTML = `
       <h3>Raum</h3>
       <label>Name<input type="text" id="rName" value="${esc(r.name)}"></label>
+      ${(() => {
+        const rc = roomRect(r);
+        if (!rc) return '<p class="hint">Innenmaße lassen sich nur bei rechteckigen, gerade ausgerichteten Räumen per Zahl ändern. Sonst: Wandecken im 2D-Grundriss ziehen.</p>';
+        const sel = (axis, a, b) => `<select data-rside="${axis}"><option value="max" ${resizeSide[axis] === 'max' ? 'selected' : ''}>${a}</option><option value="min" ${resizeSide[axis] === 'min' ? 'selected' : ''}>${b}</option></select>`;
+        return `<h3 style="margin-top:12px">Innenmaße</h3>
+          <div class="grid2">
+            <label>Breite (cm)<input type="number" data-dim="x" min="30" value="${cmTxt(rc.maxX - rc.minX)}"></label>
+            <label>Tiefe (cm)<input type="number" data-dim="z" min="30" value="${cmTxt(rc.maxZ - rc.minZ)}"></label>
+            <label>Es bewegt sich${sel('x', 'rechte Wand', 'linke Wand')}</label>
+            <label>Es bewegt sich${sel('z', 'untere Wand', 'obere Wand')}</label>
+          </div>
+          <p class="hint">Links/rechts/oben/unten wie im 2D-Grundriss. Türen und Fenster wandern mit ihrer Wand, Möbel bleiben stehen. Grenzt die Wand an einen anderen Raum, ändert sich dieser mit.</p>`;
+      })()}
       <h3 style="margin-top:12px">Boden <span class="hint">(Variante „${esc(variant().name)}“)</span></h3>
       ${matEditorHtml('edFloor', floorSpec(r), 'floor')}
       <h3 style="margin-top:12px">Wände des Raums</h3>
@@ -1829,6 +1879,12 @@ function renderProps() {
       <div class="row">${r.seed ? '<button id="rDetect">Neu erkennen</button>' : ''}<button id="pDel" class="danger">Löschen</button></div>
       <p class="hint">Hinweis: Das ist keine Wohnflächenberechnung nach Wohnflächenverordnung (z.&nbsp;B. ohne Abzüge für Dachschrägen).</p>`;
     el.querySelector('#rName').onchange = e => { pushUndo(); r.name = e.target.value.trim() || r.name; rebuildRooms(); renderProps(); scheduleSave(); };
+    el.querySelectorAll('[data-rside]').forEach(s => (s.onchange = () => { resizeSide[s.dataset.rside] = s.value; }));
+    el.querySelectorAll('[data-dim]').forEach(inp => (inp.onchange = () => {
+      const v = parseFloat(String(inp.value).replace(',', '.')) / 100;
+      if (!(v >= 0.3)) { flash('Mindestens 30 cm.'); return renderProps(); }
+      resizeRoom(r, inp.dataset.dim, v, resizeSide[inp.dataset.dim]);
+    }));
     bindMatEditor('edFloor', floorSpec(r), 'floor', spec => { pushUndo(); variant().floors[r.id] = spec; rebuildRooms(); renderProps(); scheduleSave(); });
     bindMatEditor('edRoomWall', roomWallSpec(r), 'wall', spec => { pushUndo(); variant().roomWalls[r.id] = spec; rebuildWalls(); renderProps(); scheduleSave(); });
     el.querySelector('#pDel').onclick = deleteSelection;
