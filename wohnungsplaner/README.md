@@ -18,6 +18,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
    Ist ein Bereich nicht geschlossen, zeichnest du ihn mit **„Raum ✎“** als Polygon von Hand. Ecken setzen, dann schließen per Klick auf den ersten Punkt, Doppelklick, Enter oder „Fertig“.
    Ohne Auswahl zeigt die Seitenleiste eine Übersicht aller Räume mit Summe.
    **Innenmaße ändern:** Beim ausgewählten Raum trägst du Breite und Tiefe in cm ein. Vorher wählst du, welche Wand sich bewegt: rechts oder links bzw. unten oder oben, wie im 2D-Grundriss. Türen und Fenster wandern mit ihrer Wand, Möbel bleiben stehen. Das funktioniert bei rechteckigen, gerade ausgerichteten Räumen. Andere Formen änderst du über die Wandecken.
+   **Inhalt übertragen:** Beim ausgewählten Raum speichert **„Inhalt exportieren“** alle Möbel, die in dem Raum stehen, als eigene Datei (`rauminhalt-….json`). In einem anderen Raum lädst du sie mit **„Inhalt importieren…“**, auf Wunsch um 90°, 180° oder 270° gedreht. Die Möbel kommen zu den vorhandenen hinzu. Jedes Möbel behält den Abstand zu den beiden Wänden seiner nächstgelegenen Raumecke, Möbel an der Wand bleiben also an der Wand. Liegt danach ein Möbel außerhalb des Zielraums, weist ein Hinweis darauf hin.
    **Oberflächen:** Beim ausgewählten Raum stellst du **Boden** und **Wände des Raums** ein. Zur Wahl stehen Vorlagen und eigene Werte:
    - Boden: Holz/Laminat-Dielen (Breite, Länge, Verlegung längs oder quer), Fliesen (Größe, Fugenfarbe, gerade oder diagonal), Teppichboden, Beton/Estrich, einfarbig
    - Wände: Farbe/Putz, Tapete gestreift, Holzpaneele, Klinker, Fliesen, Sichtbeton
@@ -53,6 +54,8 @@ Bei Touch wird ein Wandpunkt erst beim Loslassen gesetzt. Du kannst den Finger a
 Auf schmalen Bildschirmen (Tablet hochkant, Handy) blendest du Möbelkatalog und Eigenschaften über **„☰ Panel“** als Bereich am unteren Rand ein.
 
 Tastenkürzel: `R` dreht um 90°, `Shift+R` um 15°, `Entf` löscht, `Strg+D` dupliziert, `Strg+Z` / `Strg+Y` macht rückgängig bzw. wiederholt. Werkzeuge: `V` Auswählen, `W` Wand, `T` Tür, `F` Fenster.
+
+In der 3D-Ansicht ist der Zoom auf 0,5 m bis 60 m Abstand zum Drehpunkt begrenzt. Gerät die Ansicht trotzdem durcheinander, stellt **„Zentrieren“** sie wieder her.
 
 In der 3D-Ansicht lassen sich die Wände auf „transparent“ oder „niedrig (1 m)“ stellen, damit du besser in die Räume siehst.
 
