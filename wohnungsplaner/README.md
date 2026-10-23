@@ -17,9 +17,15 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
    Unter „Eigenschaften“ vergibst du Name und Bodenfarbe. Angezeigt wird die **Innenfläche** bis zur Wandinnenseite. Ändern sich die Wände, wird der Raum automatisch neu berechnet.
    Ist ein Bereich nicht geschlossen, zeichnest du ihn mit **„Raum ✎“** als Polygon von Hand. Ecken setzen, dann schließen per Klick auf den ersten Punkt, Doppelklick, Enter oder „Fertig“.
    Ohne Auswahl zeigt die Seitenleiste eine Übersicht aller Räume mit Summe.
+   **Oberflächen:** Beim ausgewählten Raum stellst du **Boden** und **Wände des Raums** ein. Zur Wahl stehen Vorlagen und eigene Werte:
+   - Boden: Holz/Laminat-Dielen (Breite, Länge, Verlegung längs oder quer), Fliesen (Größe, Fugenfarbe, gerade oder diagonal), Teppichboden, Beton/Estrich, einfarbig
+   - Wände: Farbe/Putz, Tapete gestreift, Holzpaneele, Klinker, Fliesen, Sichtbeton
+   - Glanzgrad: matt, seidenmatt oder glänzend
+
+   Eine einzelne Wandseite gestaltest du abweichend, indem du die Wand anklickst und bei der Seite „eigene Oberfläche“ wählst, zum Beispiel für eine Akzentwand. Die Muster erzeugt das Tool selbst, Downloads sind dafür nicht nötig. Zu sehen sind sie in 3D, die Böden auch im 2D-Grundriss.
 6. **Möbel hinzufügen** (linke Leiste): Möbel anklicken und dann in 2D oder 3D an die gewünschte Stelle ziehen.
    Unter „Eigenschaften“ lassen sich Maße, Drehung, Farbe und Höhe über Boden ändern. Mit **„Ersetzen durch“** tauschst du ein Möbelstück an gleicher Position und Drehung gegen ein anderes aus.
-7. **Variante → „+ Kopie“**: Kopiert die aktuelle Einrichtung, um eine alternative Gestaltung auszuprobieren. Möbel und Bodenfarben gehören zur Variante, Wände und Räume gelten für alle Varianten.
+7. **Variante → „+ Kopie“**: Kopiert die aktuelle Einrichtung, um eine alternative Gestaltung auszuprobieren. Möbel und Oberflächen (Boden, Wände) gehören zur Variante. Wandverlauf und Räume gelten für alle Varianten.
 
 ## Bedienung
 

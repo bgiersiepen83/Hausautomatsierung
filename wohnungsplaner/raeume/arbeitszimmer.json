@@ -430,7 +430,25 @@
      "color": "#8a6a48"
     }
    ],
-   "roomColors": {}
+   "roomColors": {},
+   "floors": {
+    "az-raum": {
+     "type": "planks",
+     "color": "#d8b07a",
+     "w": 0.19,
+     "l": 1.28,
+     "rot": 0,
+     "gloss": "satin"
+    }
+   },
+   "roomWalls": {
+    "az-raum": {
+     "type": "paint",
+     "color": "#f4f2ee",
+     "gloss": "matt"
+    }
+   },
+   "wallSides": {}
   }
  ],
  "activeVariant": "az-ist"
