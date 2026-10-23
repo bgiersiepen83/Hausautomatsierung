@@ -55,7 +55,7 @@ Auf schmalen Bildschirmen (Tablet hochkant, Handy) blendest du Möbelkatalog und
 
 Tastenkürzel: `R` dreht um 90°, `Shift+R` um 15°, `Entf` löscht, `Strg+D` dupliziert, `Strg+Z` / `Strg+Y` macht rückgängig bzw. wiederholt. Werkzeuge: `V` Auswählen, `W` Wand, `T` Tür, `F` Fenster.
 
-In der 3D-Ansicht ist der Zoom auf 0,5 m bis 60 m Abstand zum Drehpunkt begrenzt. Gerät die Ansicht trotzdem durcheinander, stellt **„Zentrieren“** sie wieder her.
+In der 3D-Ansicht ist der Zoom auf 0,5 m bis 60 m Abstand zum Drehpunkt begrenzt. Die Schrittweite pro Mausrad-Rastung stellst du oben unter **„Zoom“** ein: fein 1 %, mittel 2 % (Standard) oder grob 5 %. Sie gilt unabhängig von Bildschirm und Browser-Zoom. Gerät die Ansicht trotzdem durcheinander, stellt **„Zentrieren“** sie wieder her.
 
 In der 3D-Ansicht lassen sich die Wände auf „transparent“ oder „niedrig (1 m)“ stellen, damit du besser in die Räume siehst.
 

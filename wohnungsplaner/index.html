@@ -140,6 +140,12 @@
       <option value="transparent">transparent</option>
       <option value="low">niedrig (1 m)</option>
     </select>
+    <span class="lbl">Zoom</span>
+    <select id="zoomStep" title="Schrittweite pro Mausrad-Rastung in der 3D-Ansicht">
+      <option value="0.01">fein (1 %)</option>
+      <option value="0.02">mittel (2 %)</option>
+      <option value="0.05">grob (5 %)</option>
+    </select>
   </div>
   <div class="group">
     <span class="lbl">Variante</span>
@@ -194,7 +200,7 @@ const DEFAULT_SETTINGS = {
   wallHeight: 2.5, wallThickness: 0.15,
   doorWidth: 0.9, doorHeight: 2.0,
   windowWidth: 1.2, windowSill: 0.9, windowTop: 2.1,
-  floorColor: '#d8c7a8', wallMode: 'full',
+  floorColor: '#d8c7a8', wallMode: 'full', zoomStep: 0.02,
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -931,6 +937,26 @@ controls.maxPolarAngle = Math.PI / 2 - 0.02;
 // (Abstand wird je Schritt nur mit einem Faktor verkleinert) und kommt praktisch nicht mehr heraus.
 controls.minDistance = 0.5;
 controls.maxDistance = 60;
+// Mausrad-Zoom in 3D selbst steuern: three.js r160 teilt die Schrittweite durch (devicePixelRatio | 0) –
+// bei Browser-Zoom < 100 % ist das 0 und eine Rastung springt bis an die Zoomgrenze. Hier: feste Schrittweite
+// je Rastung (Einstellung „Zoom“), unabhängig von Bildschirm und Browser-Zoom, mit weichem Übergang.
+let zoomGoal = null;
+viewportEl.addEventListener('wheel', e => {
+  if (mode !== '3d') return;
+  e.preventDefault();
+  e.stopPropagation(); // Ereignis erreicht OrbitControls am Canvas nicht
+  let dy = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? viewportEl.clientHeight : 1);
+  dy = Math.max(-300, Math.min(300, dy));
+  const cur = zoomGoal ?? perspCam.position.distanceTo(controls.target);
+  zoomGoal = THREE.MathUtils.clamp(cur * Math.pow(1 + state.settings.zoomStep, dy / 100), controls.minDistance, controls.maxDistance);
+}, { capture: true, passive: false });
+function stepZoom() {
+  if (zoomGoal == null) return;
+  const off = perspCam.position.clone().sub(controls.target), d = off.length();
+  let nd = d + (zoomGoal - d) * 0.3;
+  if (Math.abs(zoomGoal - nd) < 0.0005) { nd = zoomGoal; zoomGoal = null; }
+  perspCam.position.copy(controls.target).add(off.setLength(nd));
+}
 controls.enabled = false;
 
 const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: state.settings.floorColor, roughness: 0.9 }));
@@ -1053,6 +1079,7 @@ function fitView() {
   updateOrtho();
   const r = Math.max(s.x, s.z, 4);
   controls.maxDistance = Math.max(60, r * 4);
+  zoomGoal = null;
   controls.target.copy(c);
   perspCam.position.set(c.x + r * 0.55, r * 0.95, c.z + r * 0.95);
   controls.update();
@@ -1907,6 +1934,7 @@ const pointers = new Map();
 let drag = null, pinch = null, gesture = null;
 
 function onPointerDown(e) {
+  zoomGoal = null;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size >= 2) {
     abortGesture();
@@ -2553,9 +2581,11 @@ function syncHeaderInputs() {
   $('#planOpacity').value = state.plan.opacity;
   $('#plan3d').checked = state.plan.show3d;
   $('#wallMode').value = state.settings.wallMode;
+  $('#zoomStep').value = String(state.settings.zoomStep);
 }
 $('#planOpacity').oninput = e => { state.plan.opacity = +e.target.value; rebuildPlan(); scheduleSave(); };
 $('#plan3d').onchange = e => { state.plan.show3d = e.target.checked; rebuildPlan(); scheduleSave(); };
+$('#zoomStep').onchange = e => { state.settings.zoomStep = +e.target.value; scheduleSave(); };
 $('#wallMode').onchange = e => { state.settings.wallMode = e.target.value; rebuildWalls(); scheduleSave(); };
 
 $('#loadImage').onclick = () => $('#imageFile').click();
@@ -2661,6 +2691,7 @@ updateUndoButtons();
 
 renderer.setAnimationLoop(() => {
   if (mode === '3d') {
+    stepZoom();
     controls.update();
     if (!camOk()) fitView(); else keepTargetNear();
   }
