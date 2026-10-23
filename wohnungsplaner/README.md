@@ -25,7 +25,17 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
 
    Eine einzelne Wandseite gestaltest du abweichend, indem du die Wand anklickst und bei der Seite „eigene Oberfläche“ wählst, zum Beispiel für eine Akzentwand. Die Muster erzeugt das Tool selbst, Downloads sind dafür nicht nötig. Zu sehen sind sie in 3D, die Böden auch im 2D-Grundriss.
 6. **Möbel hinzufügen** (linke Leiste): Möbel anklicken und dann in 2D oder 3D an die gewünschte Stelle ziehen.
-   Unter „Eigenschaften“ lassen sich Maße, Drehung, Farbe und Höhe über Boden ändern. Mit **„Ersetzen durch“** tauschst du ein Möbelstück an gleicher Position und Drehung gegen ein anderes aus.
+   Unter „Eigenschaften“ lassen sich Maße, Drehung und Höhe über Boden ändern. Mit **„Ersetzen durch“** tauschst du ein Möbelstück an gleicher Position und Drehung gegen ein anderes aus.
+   - **Ausführung** je nach Möbel:
+     - Schränke: Anzahl Türen, Dreh- oder Schiebetüren, Schubladen, Kassettenfront, Kranz, Sockel/Füße/Kugelfüße, Griffart
+     - Kommoden und Sideboards: Schubladen-Reihen und -Spalten, Türen
+     - Regale: Fächer, Rückwand, Türen unten
+     - Sofas und Sessel: Armlehnen, Sitzkissen, Rückenkissen, Füße, Kufen oder Drehfuß
+     - Stühle: Beine, Bürostuhl oder Freischwinger, Armlehnen
+     - Tische: eckig oder rund, 4 Beine, Wangen, Mittelfuß oder Kufengestell
+     - Betten: Kopfteil, Beine, Bettkasten
+     - Küche: Fronten, Schubladen
+   - **Oberflächen je Teil**, z. B. Korpus, Fronten, Griffe, Bezug, Kissen, Tischplatte, Beine: Holz (Kiefer, Eiche, Buche, Nussbaum …), Lack/Kunststoff, Metall (Edelstahl, Chrom, Schwarz, Messing), Glas (klar, getönt, milchig), Stoff mit Muster (uni, Leinen, Cord, Samt, Bouclé, Karo, Streifen, Fischgrät) und Leder, jeweils mit Farbe und Glanzgrad. „Standard wiederherstellen“ setzt ein Teil zurück.
 7. **Variante → „+ Kopie“**: Kopiert die aktuelle Einrichtung, um eine alternative Gestaltung auszuprobieren. Möbel und Oberflächen (Boden, Wände) gehören zur Variante. Wandverlauf und Räume gelten für alle Varianten.
 
 ## Bedienung

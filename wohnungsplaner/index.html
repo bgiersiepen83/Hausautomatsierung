@@ -72,6 +72,9 @@
   .mat-ed { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 4px 0; }
   .mat-head { display: flex; gap: 8px; align-items: flex-end; }
   .mat-head label { flex: 1; margin: 0 !important; }
+  label.chk { display: flex !important; align-items: center; gap: 6px; color: var(--text) !important; }
+  label.chk input { width: auto !important; display: inline !important; margin: 0 !important; }
+  button.small { font-size: 12px; padding: 2px 8px; min-height: 0; margin-top: 4px; }
   .mat-prev { width: 44px; height: 44px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
   body { touch-action: manipulation; }
   #panelToggle { display: none; }
@@ -221,131 +224,573 @@ function shade(hex, f) {
   if (f < 1) c.multiplyScalar(f); else c.lerp(new THREE.Color('#ffffff'), Math.min(1, f - 1));
   return '#' + c.getHexString();
 }
-// Quader mit Unterkante auf y
-function box(g, w, h, d, x, y, z, color, opts) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w, 0.002), Math.max(h, 0.002), Math.max(d, 0.002)), mat(color, opts));
-  m.position.set(x, y + Math.max(h, 0.002) / 2, z);
-  m.castShadow = m.receiveShadow = true;
-  g.add(m);
-  return m;
+// Texturkoordinaten in Metern, damit Holzmaserung und Stoffmuster unabhängig von der Möbelgröße gleich groß sind.
+// Muster laufen senkrecht auf Front-/Seitenflächen und entlang der Breite auf Deckflächen.
+function meterUV(geo) {
+  const pos = geo.attributes.position, nor = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (Math.abs(nor.getY(i)) > 0.5) uv.setXY(i, z, x);
+    else if (Math.abs(nor.getX(i)) > 0.5) uv.setXY(i, z, y);
+    else uv.setXY(i, x, y);
+  }
+  uv.needsUpdate = true;
 }
-function cyl(g, rTop, rBot, h, x, y, z, color, opts) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, Math.max(h, 0.002), 24), mat(color, opts));
-  m.position.set(x, y + h / 2, z);
-  m.castShadow = m.receiveShadow = true;
-  g.add(m);
-  return m;
+const toMat = (m, opts) => (typeof m === 'string' ? mat(m, opts) : m);
+// Quader mit Unterkante auf y; m = Farbe (String) oder Material
+function box(g, w, h, d, x, y, z, m, opts) {
+  const geo = new THREE.BoxGeometry(Math.max(w, 0.002), Math.max(h, 0.002), Math.max(d, 0.002));
+  meterUV(geo);
+  const mesh = new THREE.Mesh(geo, toMat(m, opts));
+  mesh.position.set(x, y + Math.max(h, 0.002) / 2, z);
+  mesh.castShadow = mesh.receiveShadow = true;
+  g.add(mesh);
+  return mesh;
+}
+function cyl(g, rTop, rBot, h, x, y, z, m, opts) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, Math.max(h, 0.002), 24), toMat(m, opts));
+  mesh.position.set(x, y + h / 2, z);
+  mesh.castShadow = mesh.receiveShadow = true;
+  g.add(mesh);
+  return mesh;
 }
 const GLASS = { transparent: true, opacity: 0.3, roughness: 0.1, depthWrite: false };
 
-const B = {
-  sofa(g, { w, d, h, color: c }) {
-    const arm = Math.min(0.22, w * 0.15), backD = Math.min(0.25, d * 0.3), seatH = Math.min(0.45, h * 0.55);
-    box(g, w - 0.1, 0.1, d - 0.1, 0, 0, 0, shade(c, 0.35));
-    box(g, w, seatH - 0.24, d, 0, 0.1, 0, c);
-    box(g, w - 2 * arm, 0.14, d - backD - 0.02, 0, seatH - 0.14, backD / 2, shade(c, 1.12));
-    box(g, w, h - 0.1, backD, 0, 0.1, -d / 2 + backD / 2, c);
-    for (const s of [-1, 1]) box(g, arm, Math.min(h, seatH + 0.2) - 0.1, d, s * (w / 2 - arm / 2), 0.1, 0, c);
-  },
-  bed(g, { w, d, h, color: c }) {
-    const frame = Math.min(0.3, h * 0.4);
-    box(g, w, frame, d, 0, 0, 0, c);
-    box(g, w - 0.06, 0.2, d - 0.1, 0, frame, 0.03, '#f3f1ec');
-    box(g, w, h, 0.08, 0, 0, -d / 2 + 0.04, shade(c, 0.85));
-    const n = w > 1.2 ? 2 : 1, pw = (w - 0.2) / n - 0.05;
-    for (let i = 0; i < n; i++) box(g, pw, 0.12, 0.35, -w / 2 + 0.1 + (i + 0.5) * (w - 0.2) / n, frame + 0.2, -d / 2 + 0.33, '#ffffff');
-    box(g, w - 0.02, 0.06, (d - 0.1) * 0.62, 0, frame + 0.2, d / 2 - (d - 0.1) * 0.31 - 0.04, shade(c, 1.45));
-  },
-  table(g, { w, d, h, color: c }) {
-    const t = 0.04, l = 0.05, ix = w / 2 - 0.06 - l / 2, iz = d / 2 - 0.06 - l / 2;
-    box(g, w, t, d, 0, h - t, 0, c);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, l, h - t, l, sx * ix, 0, sz * iz, shade(c, 0.6));
-  },
-  chair(g, { w, d, h, color: c }) {
-    const seat = Math.min(0.46, h * 0.5), l = 0.035;
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, l, seat, l, sx * (w / 2 - l), 0, sz * (d / 2 - l), shade(c, 0.6));
-    box(g, w, 0.05, d, 0, seat, 0, c);
-    box(g, w, h - seat - 0.05, 0.04, 0, seat + 0.05, -d / 2 + 0.02, c);
-  },
-  wardrobe(g, { w, d, h, color: c }) {
-    box(g, w, h, d, 0, 0, 0, c);
-    const n = Math.max(1, Math.round(w / 0.5)), dark = shade(c, 0.55);
-    for (let i = 1; i < n; i++) box(g, 0.006, h - 0.04, 0.004, -w / 2 + (i * w) / n, 0.02, d / 2 + 0.002, dark);
+// ---------------------------------------------------------------------------
+// Möbel-Oberflächen: Holz, Lack/Kunststoff, Metall, Glas, Stoff, Leder
+// ---------------------------------------------------------------------------
+const FTYPES = { wood: 'Holz', lack: 'Lack / Kunststoff', metal: 'Metall', glass: 'Glas', fabric: 'Stoff', leather: 'Leder' };
+const FABRIC_PATTERNS = { uni: 'uni (Webstoff)', leinen: 'Leinen', cord: 'Cord', samt: 'Samt', boucle: 'Bouclé', karo: 'Karo', streifen: 'Streifen', fischgrat: 'Fischgrät' };
+const FPRESETS = {
+  'Kiefer': { type: 'wood', color: '#c98a45', gloss: 'satin' },
+  'Eiche hell': { type: 'wood', color: '#c9a46b', gloss: 'satin' },
+  'Eiche geräuchert': { type: 'wood', color: '#6b4a2e', gloss: 'satin' },
+  'Buche': { type: 'wood', color: '#d6a77a', gloss: 'satin' },
+  'Nussbaum': { type: 'wood', color: '#5c3a24', gloss: 'satin' },
+  'Kirsche': { type: 'wood', color: '#9a4f2c', gloss: 'satin' },
+  'Weißeiche': { type: 'wood', color: '#ddd0b8', gloss: 'matt' },
+  'Akazie': { type: 'wood', color: '#7a5232', gloss: 'satin' },
+  'Antik dunkel': { type: 'wood', color: '#8b5a2b', gloss: 'matt' },
+  'Lack weiß matt': { type: 'lack', color: '#f2f0ea', gloss: 'matt' },
+  'Lack weiß Hochglanz': { type: 'lack', color: '#f7f7f5', gloss: 'gloss' },
+  'Lack kaschmir': { type: 'lack', color: '#cfc3b2', gloss: 'matt' },
+  'Lack hellgrau': { type: 'lack', color: '#b9bcbf', gloss: 'satin' },
+  'Lack anthrazit': { type: 'lack', color: '#3f4246', gloss: 'matt' },
+  'Lack schwarz': { type: 'lack', color: '#1d1e20', gloss: 'matt' },
+  'Lack salbeigrün': { type: 'lack', color: '#9fae97', gloss: 'matt' },
+  'Lack petrol': { type: 'lack', color: '#2f5f66', gloss: 'satin' },
+  'Edelstahl': { type: 'metal', color: '#b8bcc2', gloss: 'satin' },
+  'Chrom': { type: 'metal', color: '#e1e4e8', gloss: 'gloss' },
+  'Metall schwarz': { type: 'metal', color: '#2a2b2d', gloss: 'matt' },
+  'Messing': { type: 'metal', color: '#b5913f', gloss: 'satin' },
+  'Klarglas': { type: 'glass', color: '#d6ecf5', opacity: 0.3, gloss: 'gloss' },
+  'Milchglas': { type: 'glass', color: '#f4f6f7', opacity: 0.8, gloss: 'matt' },
+  'Rauchglas': { type: 'glass', color: '#4a4f55', opacity: 0.55, gloss: 'gloss' },
+  'Webstoff grau': { type: 'fabric', pattern: 'uni', color: '#7d8188' },
+  'Webstoff anthrazit': { type: 'fabric', pattern: 'uni', color: '#4a4d52' },
+  'Leinen natur': { type: 'fabric', pattern: 'leinen', color: '#d6ccb8' },
+  'Cord senf': { type: 'fabric', pattern: 'cord', color: '#c3962f' },
+  'Samt flaschengrün': { type: 'fabric', pattern: 'samt', color: '#2f5a43' },
+  'Samt nachtblau': { type: 'fabric', pattern: 'samt', color: '#253a5e' },
+  'Bouclé creme': { type: 'fabric', pattern: 'boucle', color: '#ece5d6' },
+  'Karo grau': { type: 'fabric', pattern: 'karo', color: '#8b8f96', color2: '#53575d' },
+  'Streifen blau-weiß': { type: 'fabric', pattern: 'streifen', color: '#eef0f2', color2: '#3d5a80' },
+  'Fischgrät anthrazit': { type: 'fabric', pattern: 'fischgrat', color: '#4d5055' },
+  'Leder cognac': { type: 'leather', color: '#9a5a2a', gloss: 'satin' },
+  'Leder braun': { type: 'leather', color: '#5a3a26', gloss: 'satin' },
+  'Leder schwarz': { type: 'leather', color: '#222222', gloss: 'satin' },
+};
+const FTYPE_DEFAULTS = {
+  wood: { color: '#c9a46b', gloss: 'satin' }, lack: { color: '#f2f0ea', gloss: 'matt' }, metal: { color: '#b8bcc2', gloss: 'satin' },
+  glass: { color: '#d6ecf5', opacity: 0.3, gloss: 'gloss' }, fabric: { color: '#7d8188', pattern: 'uni', color2: '#53575d' }, leather: { color: '#9a5a2a', gloss: 'satin' },
+};
+
+function furnTexture(spec) {
+  const key = JSON.stringify(['furn', spec.type, spec.pattern, spec.color, spec.color2]);
+  if (texCache.has(key)) return texCache.get(key);
+  const N = 512, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const ctx = c.getContext('2d'), rand = rng(hashStr(key));
+  let period = 0.5;
+  ctx.fillStyle = spec.color;
+  ctx.fillRect(0, 0, N, N);
+  const weave = (a = 0.06, step = 4) => {
+    for (let i = 0; i < N; i += step) {
+      ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(0, i, N, 1);
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.7})`; ctx.fillRect(i, 0, 1, N);
+    }
+  };
+  const blotches = (n, a, rmin, rmax) => {
     for (let i = 0; i < n; i++) {
-      const x = -w / 2 + ((i + (i % 2 ? 0.12 : 0.88)) * w) / n;
-      box(g, 0.015, 0.25, 0.02, x, h * 0.45, d / 2 + 0.01, '#8a8f96', { metalness: 0.6, roughness: 0.4 });
+      const x = rand() * N, y = rand() * N, r = rmin + rand() * (rmax - rmin), gr = ctx.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, rand() < 0.5 ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gr; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+    }
+  };
+  if (spec.type === 'wood') {
+    for (let i = 0; i < 80; i++) {
+      const x0 = rand() * N, amp = 2 + rand() * 7, k = 1 + Math.floor(rand() * 3), ph = rand() * 6.28;
+      ctx.strokeStyle = rand() < 0.6 ? `rgba(70,40,15,${0.08 + rand() * 0.18})` : `rgba(255,240,210,${0.06 + rand() * 0.08})`;
+      ctx.lineWidth = 0.6 + rand() * 1.8;
+      for (const off of [-N, 0, N]) {
+        ctx.beginPath();
+        for (let y = 0; y <= N; y += 8) ctx.lineTo(x0 + off + amp * Math.sin((6.2832 * k * y) / N + ph), y);
+        ctx.stroke();
+      }
+    }
+    for (let i = 0; i < 2; i++) {
+      const x = 60 + rand() * (N - 120), y = 60 + rand() * (N - 120), gr = ctx.createRadialGradient(x, y, 0, x, y, 14);
+      gr.addColorStop(0, 'rgba(60,30,10,0.55)'); gr.addColorStop(1, 'rgba(60,30,10,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.ellipse(x, y, 9, 18, 0, 0, 6.2832); ctx.fill();
+    }
+    period = 0.6;
+  } else if (spec.type === 'leather') {
+    blotches(50, 0.08, 20, 80);
+    speckle(ctx, N, rand, 25000, 0.1, 1.2);
+    period = 0.3;
+  } else {
+    const p = spec.pattern || 'uni', c2 = spec.color2 || tint(spec.color, -0.35);
+    if (p === 'uni') { weave(0.07, 3); speckle(ctx, N, rand, 20000, 0.08, 1); period = 0.06; }
+    if (p === 'leinen') {
+      for (let i = 0; i < 500; i++) {
+        const v = rand() < 0.5, pos = rand() * N, a = 0.04 + rand() * 0.1;
+        ctx.fillStyle = rand() < 0.5 ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`;
+        v ? ctx.fillRect(pos, 0, 1 + rand() * 2.5, N) : ctx.fillRect(0, pos, N, 1 + rand() * 2.5);
+      }
+      period = 0.2;
+    }
+    if (p === 'cord') {
+      const n = 16, rw = N / n;
+      for (let i = 0; i < n; i++) {
+        const gr = ctx.createLinearGradient(i * rw, 0, (i + 1) * rw, 0);
+        gr.addColorStop(0, 'rgba(0,0,0,0.28)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.14)'); gr.addColorStop(1, 'rgba(0,0,0,0.28)');
+        ctx.fillStyle = gr; ctx.fillRect(i * rw, 0, rw, N);
+      }
+      speckle(ctx, N, rand, 8000, 0.06, 1); period = 0.1;
+    }
+    if (p === 'samt') { blotches(30, 0.1, 60, 180); speckle(ctx, N, rand, 10000, 0.04, 1); period = 0.6; }
+    if (p === 'boucle') {
+      for (let i = 0; i < 3500; i++) {
+        ctx.strokeStyle = rand() < 0.5 ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(rand() * N, rand() * N, 2 + rand() * 4, 0, 6.2832); ctx.stroke();
+      }
+      period = 0.08;
+    }
+    if (p === 'karo') {
+      ctx.globalAlpha = 0.55; ctx.fillStyle = c2;
+      for (let i = 0; i < 2; i++) { ctx.fillRect(i * N / 2, 0, N / 8, N); ctx.fillRect(0, i * N / 2, N, N / 8); }
+      ctx.globalAlpha = 1; weave(0.06, 4); period = 0.12;
+    }
+    if (p === 'streifen') {
+      ctx.fillStyle = c2;
+      for (let i = 0; i < 4; i++) ctx.fillRect(i * N / 4, 0, N / 10, N);
+      weave(0.05, 4); period = 0.2;
+    }
+    if (p === 'fischgrat') {
+      ctx.lineWidth = 7;
+      for (let col = 0; col < 8; col++) for (let y = -40; y < N + 40; y += 12) {
+        ctx.strokeStyle = tint(spec.color, (Math.floor(y / 12) % 2 ? 0.14 : -0.14));
+        const x0 = col * 64, dir = col % 2 ? 1 : -1;
+        ctx.beginPath(); ctx.moveTo(x0 + 3, y); ctx.lineTo(x0 + 61, y + dir * 26); ctx.stroke();
+      }
+      speckle(ctx, N, rand, 6000, 0.05, 1); period = 0.08;
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  tex.repeat.set(1 / period, 1 / period);
+  texCache.set(key, tex);
+  return tex;
+}
+const furnMatCache = new Map();
+function furnMaterial(spec) {
+  const key = JSON.stringify(spec);
+  if (furnMatCache.has(key)) return furnMatCache.get(key);
+  const t = spec.type, g = spec.gloss || 'satin';
+  const map = ['wood', 'fabric', 'leather'].includes(t) ? furnTexture(spec) : null;
+  const p = { map, color: map ? '#ffffff' : spec.color, metalness: 0, roughness: { matt: 0.85, satin: 0.55, gloss: 0.2 }[g] };
+  if (t === 'fabric') p.roughness = 0.95;
+  if (t === 'metal') Object.assign(p, { metalness: 0.85, roughness: { matt: 0.55, satin: 0.35, gloss: 0.12 }[g] });
+  if (t === 'glass') Object.assign(p, { transparent: true, opacity: spec.opacity ?? 0.3, depthWrite: false, roughness: g === 'matt' ? 0.6 : 0.1 });
+  const m = new THREE.MeshStandardMaterial(p);
+  furnMatCache.set(key, m);
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// Möbel: Teile (je eigene Oberfläche) und Bau-Optionen je Erzeuger
+// ---------------------------------------------------------------------------
+const K_WOOD = ['wood', 'lack'], K_FRONT = ['wood', 'lack', 'glass'], K_METAL = ['metal', 'wood', 'lack'], K_SOFT = ['fabric', 'leather'], K_ALL = Object.keys(FTYPES);
+const sp = (type, color, extra = {}) => ({ type, color, gloss: 'satin', ...extra });
+const mainSpec = it => sp('lack', it.color);
+const darkSpec = it => sp('lack', shade(it.color, 0.6));
+const handleSpec = () => sp('metal', '#9aa0a6');
+const HANDLES = { stange: 'Stangengriff', knopf: 'Knopf', muschel: 'Muschelgriff (antik)', ohne: 'grifflos' };
+const OPT = {
+  num: (label, min, max, def) => ({ type: 'num', label, min, max, def }),
+  sel: (label, options, def) => ({ type: 'sel', label, options, def }),
+  chk: (label, def) => ({ type: 'chk', label, def }),
+};
+const FURN = {
+  wardrobe: {
+    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Türen / Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } },
+    opts: {
+      doors: OPT.num('Anzahl Türen', 1, 8, it => Math.max(1, Math.round(it.w / 0.5))),
+      doorType: OPT.sel('Türart', { dreh: 'Drehtüren', schiebe: 'Schiebetüren' }, 'dreh'),
+      drawers: OPT.num('Schubladen unten', 0, 3, 0),
+      panels: OPT.chk('Kassettenfront', false),
+      crown: OPT.chk('Kranz oben', false),
+      base: OPT.sel('Unterbau', { sockel: 'Sockel', fuesse: 'Füße', kugel: 'Kugelfüße', ohne: 'ohne' }, 'sockel'),
+      handle: OPT.sel('Griffe', HANDLES, 'stange'),
+    },
+  },
+  sideboard: {
+    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec }, fuesse: { label: 'Füße / Sockel', kinds: K_METAL, def: darkSpec } },
+    opts: {
+      drawers: OPT.num('Schubladen (Reihen)', 0, 8, it => ({ dresser: 3, nightstand: 1 }[it.type] ?? 0)),
+      drawerCols: OPT.num('Schubladen nebeneinander', 1, 4, 1),
+      doors: OPT.num('Anzahl Türen', 0, 8, it => ({ dresser: 0, nightstand: 0 }[it.type] ?? Math.max(1, Math.round(it.w / 0.45)))),
+      panels: OPT.chk('Kassettenfront', false),
+      base: OPT.sel('Unterbau', { fuesse: 'Füße', sockel: 'Sockel', kugel: 'Kugelfüße', kufe: 'Kufen', ohne: 'ohne (hängend/flach)' }, 'fuesse'),
+      handle: OPT.sel('Griffe', HANDLES, 'stange'),
+    },
+  },
+  shelf: {
+    parts: { korpus: { label: 'Korpus / Böden', kinds: K_WOOD, def: mainSpec }, rueck: { label: 'Rückwand', kinds: K_WOOD, def: it => sp('lack', shade(it.color, 0.85)) }, front: { label: 'Türen', kinds: K_FRONT, def: mainSpec } },
+    opts: {
+      shelves: OPT.num('Anzahl Fächer', 1, 15, it => Math.max(1, Math.round(it.h / 0.38))),
+      back: OPT.chk('Rückwand', true),
+      doorRows: OPT.num('Fächer mit Türen (von unten)', 0, 15, 0),
+      base: OPT.sel('Unterbau', { ohne: 'ohne', sockel: 'Sockel' }, 'ohne'),
+    },
+  },
+  sofa: {
+    parts: { bezug: { label: 'Bezug', kinds: K_SOFT, def: it => sp('fabric', it.color, { pattern: 'uni' }) }, kissen: { label: 'Sitz- und Rückenkissen', kinds: K_SOFT, def: it => sp('fabric', shade(it.color, 1.12), { pattern: 'uni' }) }, fuesse: { label: 'Füße', kinds: K_METAL, def: it => sp('wood', '#5c3a24') } },
+    opts: {
+      arms: OPT.sel('Armlehnen', { eckig: 'breit, eckig', schmal: 'schmal', rund: 'rund', ohne: 'ohne' }, 'eckig'),
+      seats: OPT.num('Sitzkissen', 1, 5, it => Math.max(1, Math.round((it.w - 0.4) / 0.6))),
+      backCushions: OPT.chk('Rückenkissen', true),
+      feet: OPT.sel('Füße', { holz: 'Holzfüße', metall: 'Metallfüße', kufe: 'Kufen', dreh: 'Drehfuß (Stern)', sockel: 'Sockel' }, 'holz'),
+    },
+  },
+  chair: {
+    parts: { sitz: { label: 'Sitz / Rücken', kinds: K_ALL, def: mainSpec }, gestell: { label: 'Gestell', kinds: K_METAL, def: it => sp('metal', '#2a2b2d') } },
+    opts: {
+      base: OPT.sel('Gestell', { beine: '4 Beine', buero: 'Bürostuhl (Rollen)', kufe: 'Freischwinger' }, 'beine'),
+      arms: OPT.chk('Armlehnen', false),
+    },
+  },
+  table: {
+    parts: { platte: { label: 'Tischplatte', kinds: ['wood', 'lack', 'glass', 'metal'], def: mainSpec }, beine: { label: 'Beine / Gestell', kinds: K_METAL, def: darkSpec } },
+    opts: {
+      shape: OPT.sel('Plattenform', { eckig: 'eckig', rund: 'rund / oval' }, 'eckig'),
+      legs: OPT.sel('Gestell', { vier: '4 Beine', wangen: 'Wangen', mittel: 'Mittelfuß', kufen: 'Kufengestell' }, 'vier'),
+    },
+  },
+  bed: {
+    parts: { gestell: { label: 'Bettgestell', kinds: K_ALL, def: mainSpec }, kopfteil: { label: 'Kopfteil', kinds: K_ALL, def: it => sp('lack', shade(it.color, 0.85)) }, waesche: { label: 'Bettwäsche', kinds: K_SOFT, def: it => sp('fabric', shade(it.color, 1.45), { pattern: 'uni' }) } },
+    opts: {
+      head: OPT.sel('Kopfteil', { gerade: 'gerade', gepolstert: 'gepolstert', hoch: 'hoch gepolstert', ohne: 'ohne' }, 'gerade'),
+      base: OPT.sel('Unterbau', { sockel: 'geschlossen', beine: 'Beine' }, 'sockel'),
+      drawers: OPT.chk('Bettkasten (Schubladen)', false),
+    },
+  },
+  kitchen: {
+    parts: { front: { label: 'Fronten', kinds: K_FRONT, def: mainSpec }, platte: { label: 'Arbeitsplatte', kinds: ['wood', 'lack', 'metal'], def: () => sp('lack', '#bdb6aa', { gloss: 'satin' }) }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } },
+    opts: { fronts: OPT.num('Anzahl Fronten', 1, 12, it => Math.max(1, Math.round(it.w / 0.6))), drawersTop: OPT.chk('Schubladen oben', false), handle: OPT.sel('Griffe', HANDLES, 'stange') },
+  },
+  fridge: { parts: { front: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } }, opts: {} },
+  tv: { parts: { rahmen: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  rug: { parts: { stoff: { label: 'Teppich', kinds: ['fabric'], def: it => sp('fabric', it.color, { pattern: 'uni' }) } }, opts: { shape: OPT.sel('Form', { eckig: 'eckig', rund: 'rund / oval' }, 'eckig') } },
+  plant: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec } }, opts: {} },
+  lamp: { parts: { schirm: { label: 'Schirm', kinds: ['fabric', 'lack', 'metal', 'glass'], def: it => sp('fabric', it.color, { pattern: 'leinen' }) }, gestell: { label: 'Gestell', kinds: K_METAL, def: () => sp('metal', '#2a2b2d') } }, opts: {} },
+  bathtub: { parts: { korpus: { label: 'Wanne', kinds: ['lack'], def: mainSpec } }, opts: {} },
+  shower: { parts: { korpus: { label: 'Duschtasse', kinds: ['lack'], def: mainSpec }, glas: { label: 'Duschwand', kinds: ['glass'], def: () => sp('glass', '#bfe0f2', { opacity: 0.3, gloss: 'gloss' }) } }, opts: {} },
+  wc: { parts: { korpus: { label: 'Keramik', kinds: ['lack'], def: mainSpec } }, opts: {} },
+  basin: { parts: { korpus: { label: 'Unterschrank', kinds: K_WOOD, def: mainSpec }, becken: { label: 'Waschbecken', kinds: ['lack'], def: () => sp('lack', '#ffffff', { gloss: 'gloss' }) } }, opts: {} },
+  box: { parts: { main: { label: 'Oberfläche', kinds: K_ALL, def: mainSpec } }, opts: {} },
+};
+function partSpec(it, key) {
+  const def = FURN[CATALOG[it.type].b].parts[key];
+  return it.parts?.[key] || def.def(it);
+}
+function optVal(it, key) {
+  const o = FURN[CATALOG[it.type].b].opts[key];
+  const v = it.opts?.[key];
+  return v ?? (typeof o.def === 'function' ? o.def(it) : o.def);
+}
+
+// Griff an einer Front; vertical = senkrechter Stangengriff
+function handle(g, kind, x, y, z, vertical, M) {
+  if (kind === 'ohne') return;
+  if (kind === 'stange') vertical ? box(g, 0.014, 0.22, 0.025, x, y - 0.11, z, M) : box(g, 0.2, 0.014, 0.025, x, y, z, M);
+  else if (kind === 'knopf') box(g, 0.028, 0.028, 0.025, x, y - 0.014, z, M);
+  else box(g, 0.07, 0.03, 0.02, x, y - 0.015, z, M);
+}
+// Front (Tür oder Schublade) mit optionaler Kassette
+function frontPanel(g, w, h, x, y, zFront, F, panels) {
+  box(g, w, h, 0.02, x, y, zFront - 0.01, F);
+  if (panels && w > 0.15 && h > 0.15) box(g, w - Math.min(0.12, w * 0.3), h - Math.min(0.14, h * 0.25), 0.012, x, y + Math.min(0.07, h * 0.125), zFront + 0.004, F);
+}
+function baseFeet(g, kind, w, d, h, M) {
+  if (kind === 'sockel') box(g, w - 0.04, h, d - 0.05, 0, 0, -0.01, M);
+  else if (kind === 'fuesse') for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.035, h, 0.035, sx * (w / 2 - 0.05), 0, sz * (d / 2 - 0.05), M);
+  else if (kind === 'kugel') for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(g, 0.035, 0.05, h, sx * (w / 2 - 0.07), 0, sz * (d / 2 - 0.07), M);
+  else if (kind === 'kufe') for (const sx of [-1, 1]) { box(g, 0.02, 0.02, d - 0.06, sx * (w / 2 - 0.06), 0, 0, M); box(g, 0.02, h, 0.02, sx * (w / 2 - 0.06), 0, 0, M); }
+}
+const baseHeight = kind => ({ sockel: 0.08, fuesse: 0.12, kugel: 0.1, kufe: 0.1 }[kind] || 0);
+
+const B = {
+  wardrobe(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const K = P('korpus'), F = P('front'), Gm = P('griffe');
+    const baseH = baseHeight(o('base')), crown = o('crown') ? Math.min(0.12, h * 0.06) : 0;
+    baseFeet(g, o('base'), w, d, baseH, K);
+    const bodyH = h - baseH - crown, zf = d / 2;
+    box(g, w, bodyH, d - 0.02, 0, baseH, -0.01, K);
+    if (crown) { box(g, w + 0.06, crown * 0.4, d + 0.02, 0, h - crown, 0.01, K); box(g, w + 0.1, crown * 0.6, d + 0.04, 0, h - crown * 0.6, 0.02, K); }
+    const nDr = Math.min(3, Math.round(o('drawers'))), drH = nDr ? Math.min(0.22, bodyH * 0.15) : 0;
+    for (let i = 0; i < nDr; i++) {
+      const y = baseH + i * drH;
+      frontPanel(g, w - 0.006, drH - 0.006, 0, y + 0.003, zf, F, false);
+      handle(g, o('handle'), 0, y + drH / 2, zf + 0.012, false, Gm);
+    }
+    const n = Math.max(1, Math.round(o('doors'))), y0 = baseH + nDr * drH, dh = bodyH - nDr * drH;
+    if (o('doorType') === 'schiebe') {
+      const sw = w / n + 0.02;
+      for (let i = 0; i < n; i++) {
+        const x = -w / 2 + (i + 0.5) * (w / n), z = zf + (i % 2 ? 0.022 : 0);
+        frontPanel(g, sw, dh - 0.006, x, y0 + 0.003, z, F, o('panels'));
+        if (o('handle') !== 'ohne') box(g, 0.012, 0.3, 0.012, x + (i % 2 ? -1 : 1) * (sw / 2 - 0.04), y0 + dh * 0.45, z + 0.008, Gm);
+      }
+    } else {
+      const dw = w / n;
+      for (let i = 0; i < n; i++) {
+        const x = -w / 2 + (i + 0.5) * dw;
+        frontPanel(g, dw - 0.006, dh - 0.006, x, y0 + 0.003, zf, F, o('panels'));
+        const side = n === 1 || i < n / 2 ? 1 : -1;
+        handle(g, o('handle'), x + side * (dw / 2 - 0.05), y0 + Math.min(dh * 0.5, 1.1), zf + 0.012, true, Gm);
+      }
     }
   },
-  shelf(g, { w, d, h, color: c }) {
-    const t = 0.02;
-    for (const s of [-1, 1]) box(g, t, h, d, s * (w / 2 - t / 2), 0, 0, c);
-    const n = Math.max(2, Math.round(h / 0.38));
-    for (let i = 0; i <= n; i++) box(g, w - 2 * t, t, d, 0, Math.min(h - t, (i * (h - t)) / n), 0, c);
-    box(g, w - 2 * t, h, 0.005, 0, 0, -d / 2 + 0.003, shade(c, 0.85));
+  sideboard(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const K = P('korpus'), F = P('front'), Gm = P('griffe');
+    const baseH = Math.min(baseHeight(o('base')), h * 0.25);
+    baseFeet(g, o('base'), w, d, baseH, P('fuesse'));
+    const bodyH = h - baseH, zf = d / 2;
+    box(g, w, bodyH, d - 0.02, 0, baseH, -0.01, K);
+    const rows = Math.round(o('drawers')), cols = Math.max(1, Math.round(o('drawerCols'))), nDoor = Math.round(o('doors'));
+    const drH = rows ? (nDoor ? Math.min(0.2, bodyH / (rows + 1.5)) : bodyH / rows) : 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const y = baseH + bodyH - (r + 1) * drH, cw = w / cols, x = -w / 2 + (c + 0.5) * cw;
+      frontPanel(g, cw - 0.006, drH - 0.006, x, y + 0.003, zf, F, o('panels'));
+      handle(g, o('handle'), x, y + drH * 0.6, zf + 0.012, false, Gm);
+    }
+    const dh = bodyH - rows * drH;
+    if (nDoor > 0 && dh > 0.05) {
+      const dw = w / nDoor;
+      for (let i = 0; i < nDoor; i++) {
+        const x = -w / 2 + (i + 0.5) * dw;
+        frontPanel(g, dw - 0.006, dh - 0.006, x, baseH + 0.003, zf, F, o('panels'));
+        const side = nDoor === 1 ? 1 : i < nDoor / 2 ? 1 : -1;
+        handle(g, o('handle'), x + side * (dw / 2 - 0.04), baseH + dh * 0.75, zf + 0.012, true, Gm);
+      }
+    } else if (!rows) frontPanel(g, w - 0.006, bodyH - 0.006, 0, baseH + 0.003, zf, F, false);
   },
-  sideboard(g, { w, d, h, color: c }) {
-    const leg = Math.min(0.1, h * 0.2);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.03, leg, 0.03, sx * (w / 2 - 0.05), 0, sz * (d / 2 - 0.05), shade(c, 0.5));
-    box(g, w, h - leg, d, 0, leg, 0, c);
-    const n = Math.max(1, Math.round(w / 0.45));
-    for (let i = 1; i < n; i++) box(g, 0.006, h - leg - 0.04, 0.004, -w / 2 + (i * w) / n, leg + 0.02, d / 2 + 0.002, shade(c, 0.55));
+  shelf(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const K = P('korpus'), t = 0.02, baseH = o('base') === 'sockel' ? 0.06 : 0;
+    if (baseH) box(g, w - 0.04, baseH, d - 0.04, 0, 0, 0, K);
+    for (const s of [-1, 1]) box(g, t, h - baseH, d, s * (w / 2 - t / 2), baseH, 0, K);
+    const n = Math.max(1, Math.round(o('shelves'))), inner = (h - baseH - (n + 1) * t) / n;
+    for (let i = 0; i <= n; i++) box(g, w - 2 * t, t, d, 0, baseH + i * (inner + t), 0, K);
+    if (o('back')) box(g, w - 2 * t, h - baseH, 0.006, 0, baseH, -d / 2 + 0.004, P('rueck'));
+    const dr = Math.min(n, Math.round(o('doorRows')));
+    if (dr) {
+      const F = P('front'), cols = Math.max(1, Math.round(w / 0.5)), dw = w / cols, dh = dr * inner + (dr - 1) * t;
+      for (let i = 0; i < cols; i++) frontPanel(g, dw - 0.006, dh, -w / 2 + (i + 0.5) * dw, baseH + t, d / 2 + 0.01, F, false);
+    }
   },
-  tv(g, { w, d, h, color: c }) {
-    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.3 });
+  sofa(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const C = P('bezug'), Ki = P('kissen'), Fu = P('fuesse'), feet = o('feet');
+    const fH = feet === 'sockel' ? 0.06 : feet === 'dreh' ? 0.14 : 0.1;
+    const arm = { eckig: Math.min(0.2, w * 0.15), schmal: 0.08, rund: Math.min(0.2, w * 0.15), ohne: 0 }[o('arms')];
+    const backD = Math.min(0.25, d * 0.3), seatH = Math.min(0.45, h * 0.55), cushH = 0.14;
+    box(g, w, Math.max(0.05, seatH - cushH - fH), d, 0, fH, 0, C);
+    const n = Math.max(1, Math.round(o('seats'))), sw = (w - 2 * arm) / n;
+    for (let i = 0; i < n; i++) box(g, sw - 0.012, cushH, d - backD - 0.02, -w / 2 + arm + (i + 0.5) * sw, seatH - cushH, backD / 2, Ki);
+    box(g, w, h - fH, backD, 0, fH, -d / 2 + backD / 2, C);
+    if (o('backCushions')) for (let i = 0; i < n; i++) box(g, sw - 0.02, Math.max(0.1, h - seatH - 0.06), 0.13, -w / 2 + arm + (i + 0.5) * sw, seatH, -d / 2 + backD + 0.065, Ki);
+    if (arm) {
+      const aH = Math.min(h, seatH + 0.2) - fH;
+      for (const s of [-1, 1]) {
+        const x = s * (w / 2 - arm / 2);
+        if (o('arms') === 'rund') {
+          box(g, arm, aH - arm / 2, d, x, fH, 0, C);
+          const r = new THREE.Mesh(new THREE.CylinderGeometry(arm / 2, arm / 2, d, 20), C);
+          r.rotation.x = Math.PI / 2; r.position.set(x, fH + aH - arm / 2, 0); r.castShadow = r.receiveShadow = true; g.add(r);
+        } else box(g, arm, aH, d, x, fH, 0, C);
+      }
+    }
+    if (feet === 'sockel') box(g, w - 0.08, fH, d - 0.08, 0, 0, 0, Fu);
+    else if (feet === 'holz') for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(g, 0.022, 0.015, fH, sx * (w / 2 - 0.07), 0, sz * (d / 2 - 0.07), Fu);
+    else if (feet === 'metall') for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.015, fH, 0.04, sx * (w / 2 - 0.06), 0, sz * (d / 2 - 0.06), Fu);
+    else if (feet === 'kufe') for (const sx of [-1, 1]) { box(g, 0.025, 0.02, d - 0.08, sx * (w / 2 - 0.08), 0, 0, Fu); for (const sz of [-1, 1]) box(g, 0.025, fH, 0.025, sx * (w / 2 - 0.08), 0, sz * (d / 2 - 0.08), Fu); }
+    else if (feet === 'dreh') {
+      cyl(g, 0.03, 0.03, fH, 0, 0, 0, Fu);
+      const len = Math.min(w, d) * 0.42;
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2, b = box(g, len, 0.025, 0.04, Math.cos(a) * len / 2, 0, Math.sin(a) * len / 2, Fu);
+        b.rotation.y = -a;
+      }
+    }
+  },
+  chair(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const S = P('sitz'), Ge = P('gestell'), base = o('base');
+    const seat = Math.min(0.48, h * 0.5), l = 0.03;
+    if (base === 'buero') {
+      cyl(g, 0.025, 0.025, seat - 0.13, 0, 0.07, 0, Ge);
+      const len = Math.max(w, d) * 0.5;
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2, b = box(g, len, 0.03, 0.04, Math.cos(a) * len / 2, 0.04, Math.sin(a) * len / 2, Ge);
+        b.rotation.y = -a;
+        cyl(g, 0.025, 0.025, 0.045, Math.cos(a) * len, 0, Math.sin(a) * len, Ge);
+      }
+      box(g, w, 0.08, d, 0, seat - 0.06, 0, S);
+      box(g, 0.05, 0.12, 0.03, 0, seat, -d / 2 + 0.02, Ge);
+      box(g, w * 0.92, h - seat - 0.08, 0.07, 0, seat + 0.08, -d / 2 + 0.035, S);
+    } else {
+      if (base === 'kufe') for (const sx of [-1, 1]) {
+        box(g, 0.02, 0.02, d, sx * (w / 2 - 0.03), 0, 0.02, Ge);
+        box(g, 0.02, seat, 0.02, sx * (w / 2 - 0.03), 0, d / 2 - 0.01, Ge);
+      } else for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, l, seat, l, sx * (w / 2 - l), 0, sz * (d / 2 - l), Ge);
+      box(g, w, 0.05, d, 0, seat, 0, S);
+      box(g, w, h - seat - 0.05, 0.04, 0, seat + 0.05, -d / 2 + 0.02, S);
+    }
+    if (o('arms')) for (const sx of [-1, 1]) {
+      box(g, 0.04, 0.03, d * 0.6, sx * (w / 2 + 0.01), seat + 0.2, 0, Ge);
+      box(g, 0.03, 0.2, 0.03, sx * (w / 2 + 0.01), seat, -d * 0.1, Ge);
+    }
+  },
+  table(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const T = P('platte'), L = P('beine'), t = 0.04, round = o('shape') === 'rund', legs = o('legs');
+    if (round) {
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, t, 48), T);
+      top.scale.set(w, 1, d); top.position.y = h - t / 2; top.castShadow = top.receiveShadow = true; g.add(top);
+    } else box(g, w, t, d, 0, h - t, 0, T);
+    const lh = h - t;
+    if (legs === 'vier') {
+      const ix = round ? w * 0.3 : w / 2 - 0.085, iz = round ? d * 0.3 : d / 2 - 0.085;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.05, lh, 0.05, sx * ix, 0, sz * iz, L);
+    } else if (legs === 'wangen') {
+      for (const s of [-1, 1]) box(g, 0.04, lh, d * 0.8, s * (w / 2 - 0.1), 0, 0, L);
+      box(g, w - 0.2, 0.1, 0.02, 0, lh - 0.12, -d * 0.25, L);
+    } else if (legs === 'mittel') {
+      cyl(g, 0.05, 0.06, lh, 0, 0, 0, L);
+      const base = cyl(g, 0.5, 0.5, 0.03, 0, 0, 0, L); base.scale.set(Math.min(w, d) * 0.6, 1, Math.min(w, d) * 0.6);
+    } else for (const s of [-1, 1]) {
+      const x = s * (w / 2 - 0.1);
+      for (const sz of [-1, 1]) box(g, 0.04, lh, 0.04, x, 0, sz * (d / 2 - 0.08), L);
+      box(g, 0.04, 0.04, d - 0.12, x, 0, 0, L);
+      box(g, 0.04, 0.04, d - 0.12, x, lh - 0.04, 0, L);
+    }
+  },
+  bed(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const Gs = P('gestell'), Kt = P('kopfteil'), Wa = P('waesche'), frame = Math.min(0.3, h * 0.4);
+    if (o('base') === 'beine') {
+      box(g, w, 0.14, d, 0, frame - 0.14, 0, Gs);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(g, 0.06, frame - 0.14, 0.06, sx * (w / 2 - 0.05), 0, sz * (d / 2 - 0.05), Gs);
+    } else box(g, w, frame, d, 0, 0, 0, Gs);
+    if (o('drawers')) for (const s of [-1, 1]) for (const k of [-1, 1]) box(g, 0.012, Math.min(0.18, frame - 0.06), d * 0.38, s * (w / 2 + 0.004), 0.04, k * d * 0.21, Gs);
+    box(g, w - 0.06, 0.2, d - 0.1, 0, frame, 0.03, '#f3f1ec');
+    const head = o('head');
+    if (head !== 'ohne') {
+      const hh = head === 'hoch' ? Math.max(h, 1.2) : h, hd = head === 'gerade' ? 0.06 : 0.12;
+      box(g, w + (head === 'gerade' ? 0 : 0.04), hh, hd, 0, 0, -d / 2 + hd / 2, Kt);
+    }
+    const n = w > 1.2 ? 2 : 1, pw = (w - 0.2) / n - 0.05;
+    for (let i = 0; i < n; i++) box(g, pw, 0.12, 0.35, -w / 2 + 0.1 + (i + 0.5) * (w - 0.2) / n, frame + 0.2, -d / 2 + 0.33, Wa);
+    box(g, w - 0.02, 0.06, (d - 0.1) * 0.62, 0, frame + 0.2, d / 2 - (d - 0.1) * 0.31 - 0.04, Wa);
+  },
+  kitchen(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const F = P('front'), Gm = P('griffe'), plinth = 0.1, top = 0.04, zf = d / 2 - 0.02;
+    box(g, w, plinth, d - 0.06, 0, 0, -0.03, '#4a4a4a');
+    box(g, w, h - plinth - top, d - 0.04, 0, plinth, -0.02, F);
+    box(g, w, top, d, 0, h - top, 0, P('platte'));
+    const n = Math.max(1, Math.round(o('fronts'))), fw = w / n, bodyH = h - plinth - top, drH = o('drawersTop') ? 0.16 : 0;
+    for (let i = 0; i < n; i++) {
+      const x = -w / 2 + (i + 0.5) * fw;
+      if (drH) { frontPanel(g, fw - 0.006, drH - 0.006, x, plinth + bodyH - drH + 0.003, zf + 0.02, F, false); handle(g, o('handle'), x, plinth + bodyH - drH / 2, zf + 0.032, false, Gm); }
+      frontPanel(g, fw - 0.006, bodyH - drH - 0.006, x, plinth + 0.003, zf + 0.02, F, false);
+      handle(g, o('handle'), x, plinth + bodyH - drH - 0.06, zf + 0.032, false, Gm);
+    }
+  },
+  fridge(g, it) {
+    const { w, d, h } = it, F = furnMaterial(partSpec(it, 'front')), Gm = furnMaterial(partSpec(it, 'griffe'));
+    box(g, w, h, d, 0, 0, 0, F);
+    box(g, w - 0.01, 0.008, 0.004, 0, h * 0.62, d / 2 + 0.002, '#555a60');
+    box(g, 0.02, 0.3, 0.03, w / 2 - 0.06, h * 0.68, d / 2 + 0.015, Gm);
+  },
+  tv(g, it) {
+    const { w, d, h } = it;
+    box(g, w, h, d, 0, 0, 0, furnMaterial(partSpec(it, 'rahmen')));
     box(g, w - 0.03, h - 0.03, 0.002, 0, 0.015, d / 2 + 0.001, '#05070a', { roughness: 0.15 });
   },
-  rug(g, { w, d, color: c }) {
-    const m = box(g, w, 0.012, d, 0, 0, 0, c, { roughness: 1 });
+  rug(g, it) {
+    const { w, d } = it, M = furnMaterial(partSpec(it, 'stoff'));
+    let m;
+    if (optVal(it, 'shape') === 'rund') { m = cyl(g, 0.5, 0.5, 0.012, 0, 0, 0, M); m.scale.set(w, 1, d); }
+    else m = box(g, w, 0.012, d, 0, 0, 0, M);
     m.castShadow = false;
   },
-  plant(g, { w, d, h, color: c }) {
-    const r = Math.min(w, d) / 2, potH = h * 0.3;
-    cyl(g, r * 0.6, r * 0.45, potH, 0, 0, 0, c);
+  plant(g, it) {
+    const { w, d, h } = it, r = Math.min(w, d) / 2, potH = h * 0.3;
+    cyl(g, r * 0.6, r * 0.45, potH, 0, 0, 0, furnMaterial(partSpec(it, 'topf')));
     const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), mat('#4f7d3a'));
     s.scale.y = (h - potH) / (2 * r);
     s.position.y = potH + (h - potH) / 2;
     s.castShadow = s.receiveShadow = true;
     g.add(s);
   },
-  lamp(g, { w, h, color: c }) {
-    cyl(g, w * 0.4, w * 0.4, 0.03, 0, 0, 0, '#3a3a3a');
-    cyl(g, 0.012, 0.012, h - 0.3, 0, 0.03, 0, '#3a3a3a');
-    cyl(g, w * 0.32, w * 0.5, 0.3, 0, h - 0.3, 0, c, { emissive: '#ffe2a8', emissiveIntensity: 0.35 });
+  lamp(g, it) {
+    const { w, h } = it, Ge = furnMaterial(partSpec(it, 'gestell'));
+    cyl(g, w * 0.4, w * 0.4, 0.03, 0, 0, 0, Ge);
+    cyl(g, 0.012, 0.012, h - 0.3, 0, 0.03, 0, Ge);
+    cyl(g, w * 0.32, w * 0.5, 0.3, 0, h - 0.3, 0, furnMaterial(partSpec(it, 'schirm')));
   },
-  kitchen(g, { w, d, h, color: c }) {
-    const plinth = 0.1, top = 0.04;
-    box(g, w, plinth, d - 0.06, 0, 0, -0.03, '#4a4a4a');
-    box(g, w, h - plinth - top, d - 0.02, 0, plinth, -0.01, c);
-    box(g, w, top, d, 0, h - top, 0, '#bdb6aa');
-    const n = Math.max(1, Math.round(w / 0.6));
-    for (let i = 1; i < n; i++) box(g, 0.006, h - plinth - top - 0.02, 0.004, -w / 2 + (i * w) / n, plinth + 0.01, d / 2 - 0.018, shade(c, 0.6));
-  },
-  fridge(g, { w, d, h, color: c }) {
-    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.4 });
-    box(g, w - 0.01, 0.008, 0.004, 0, h * 0.62, d / 2 + 0.002, shade(c, 0.6));
-    box(g, 0.02, 0.3, 0.03, w / 2 - 0.06, h * 0.68, d / 2 + 0.015, '#8a8f96', { metalness: 0.6, roughness: 0.4 });
-  },
-  bathtub(g, { w, d, h, color: c }) {
-    box(g, w, h, d, 0, 0, 0, c, { roughness: 0.3 });
+  bathtub(g, it) {
+    const { w, d, h } = it;
+    box(g, w, h, d, 0, 0, 0, furnMaterial(partSpec(it, 'korpus')));
     box(g, w - 0.14, 0.02, d - 0.14, 0, h - 0.015, 0, '#cfe3ef', { roughness: 0.2 });
   },
-  shower(g, { w, d, h, color: c }) {
-    box(g, w, 0.05, d, 0, 0, 0, c, { roughness: 0.3 });
-    box(g, w, h - 0.05, 0.01, 0, 0.05, d / 2 - 0.005, '#bfe0f2', GLASS);
-    box(g, 0.01, h - 0.05, d, w / 2 - 0.005, 0.05, 0, '#bfe0f2', GLASS);
+  shower(g, it) {
+    const { w, d, h } = it, Gl = furnMaterial(partSpec(it, 'glas'));
+    box(g, w, 0.05, d, 0, 0, 0, furnMaterial(partSpec(it, 'korpus')));
+    box(g, w, h - 0.05, 0.01, 0, 0.05, d / 2 - 0.005, Gl);
+    box(g, 0.01, h - 0.05, d, w / 2 - 0.005, 0.05, 0, Gl);
   },
-  wc(g, { w, d, h, color: c }) {
-    box(g, w, Math.min(0.4, h * 0.5), 0.18, 0, h - Math.min(0.4, h * 0.5), -d / 2 + 0.09, c, { roughness: 0.3 });
-    const r = w / 2 * 0.95;
-    const bowl = cyl(g, r, r * 0.75, 0.4, 0, 0, -d / 2 + 0.18 + (d - 0.18) / 2, c, { roughness: 0.3 });
+  wc(g, it) {
+    const { w, d, h } = it, C = furnMaterial(partSpec(it, 'korpus'));
+    box(g, w, Math.min(0.4, h * 0.5), 0.18, 0, h - Math.min(0.4, h * 0.5), -d / 2 + 0.09, C);
+    const r = (w / 2) * 0.95;
+    const bowl = cyl(g, r, r * 0.75, 0.4, 0, 0, -d / 2 + 0.18 + (d - 0.18) / 2, C);
     bowl.scale.z = (d - 0.18) / (2 * r);
   },
-  basin(g, { w, d, h, color: c }) {
-    box(g, w, h - 0.12, d - 0.02, 0, 0, -0.01, c);
-    box(g, w, 0.12, d, 0, h - 0.12, 0, '#ffffff', { roughness: 0.3 });
+  basin(g, it) {
+    const { w, d, h } = it, Be = furnMaterial(partSpec(it, 'becken'));
+    box(g, w, h - 0.12, d - 0.02, 0, 0, -0.01, furnMaterial(partSpec(it, 'korpus')));
+    box(g, w, 0.12, d, 0, h - 0.12, 0, Be);
     box(g, w * 0.6, 0.01, d * 0.6, 0, h - 0.005, 0.02, '#dfe9ef', { roughness: 0.2 });
   },
-  box(g, { w, d, h, color: c }) { box(g, w, h, d, 0, 0, 0, c); },
+  box(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, furnMaterial(partSpec(it, 'main'))); },
 };
 
 // Typ-Schlüssel -> Bezeichnung, Gruppe, Standardmaße (B x T x H in m), Farbe, Erzeuger
@@ -997,7 +1442,7 @@ function duplicateSelection() {
   if (selection?.kind !== 'item') return;
   const src = getItem(selection.id);
   pushUndo();
-  const it = { ...src, id: uid(), x: round2(src.x + 0.3), z: round2(src.z + 0.3) };
+  const it = { ...JSON.parse(JSON.stringify(src)), id: uid(), x: round2(src.x + 0.3), z: round2(src.z + 0.3) };
   items().push(it);
   rebuildItem(it);
   select({ kind: 'item', id: it.id });
@@ -1014,6 +1459,7 @@ function replaceItem(it, type) {
   const d = CATALOG[type];
   pushUndo();
   Object.assign(it, { type, w: d.w, d: d.d, h: d.h, elev: d.elev || 0, color: d.color });
+  delete it.parts; delete it.opts;
   rebuildItem(it); renderProps(); scheduleSave();
 }
 function moveEndpoint(oldP, newP) {
@@ -1710,6 +2156,51 @@ function resizeRoom(r, axis, size, side) {
   scheduleSave();
 }
 
+// Möbel: Bau-Optionen und Oberflächen-Editor je Teil
+function furnOptionsHtml(it) {
+  const opts = FURN[CATALOG[it.type].b].opts, keys = Object.keys(opts);
+  if (!keys.length) return '';
+  return `<h3 style="margin-top:12px">Ausführung</h3><div class="grid2">${keys.map(k => {
+    const o = opts[k], v = optVal(it, k);
+    if (o.type === 'chk') return `<label class="chk"><input type="checkbox" data-o="${k}" ${v ? 'checked' : ''}> ${o.label}</label>`;
+    if (o.type === 'num') return `<label>${o.label}<input type="number" data-o="${k}" min="${o.min}" max="${o.max}" step="1" value="${v}"></label>`;
+    return `<label>${o.label}<select data-o="${k}">${Object.entries(o.options).map(([ov, ol]) => `<option value="${ov}" ${ov === v ? 'selected' : ''}>${ol}</option>`).join('')}</select></label>`;
+  }).join('')}</div>`;
+}
+function furnEditorHtml(id, label, spec, kinds, own) {
+  const t = spec.type, f = [];
+  const groups = {};
+  for (const [name, p] of Object.entries(FPRESETS)) if (kinds.includes(p.type)) (groups[FTYPES[p.type]] ||= []).push(name);
+  f.push(`<label>Art<select data-fm="type">${kinds.map(k => `<option value="${k}" ${k === t ? 'selected' : ''}>${FTYPES[k]}</option>`).join('')}</select></label>`);
+  f.push(`<label>Farbe<input type="color" data-fm="color" value="${spec.color}"></label>`);
+  if (t === 'fabric') {
+    f.push(`<label>Stoffmuster<select data-fm="pattern">${Object.entries(FABRIC_PATTERNS).map(([k, l]) => `<option value="${k}" ${k === (spec.pattern || 'uni') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`);
+    if (['karo', 'streifen'].includes(spec.pattern)) f.push(`<label>Farbe 2<input type="color" data-fm="color2" value="${spec.color2 || '#53575d'}"></label>`);
+  }
+  if (['wood', 'lack', 'metal', 'leather'].includes(t)) f.push(`<label>Oberfläche<select data-fm="gloss">${[['matt', 'matt'], ['satin', 'seidenmatt'], ['gloss', 'glänzend']].map(([v, l]) => `<option value="${v}" ${v === (spec.gloss || 'satin') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`);
+  if (t === 'glass') f.push(`<label>Durchsicht<select data-fm="opacity">${[[0.3, 'klar'], [0.55, 'getönt'], [0.8, 'milchig']].map(([v, l]) => `<option value="${v}" ${Math.abs(v - (spec.opacity ?? 0.3)) < 0.01 ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`);
+  return `<div class="mat-ed" id="${id}">
+    <div class="mat-head"><canvas class="mat-prev" width="44" height="44"></canvas>
+      <label><b>${label}</b><select data-fpreset><option value="">– Vorlage –</option>${Object.entries(groups).map(([gname, list]) => `<optgroup label="${gname}">${list.map(n => `<option>${n}</option>`).join('')}</optgroup>`).join('')}</select></label></div>
+    <div class="grid2">${f.join('')}</div>
+    ${own ? '<button data-freset class="small">Standard wiederherstellen</button>' : ''}</div>`;
+}
+function bindFurnEditor(id, spec, kinds, onChange) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const ctx = el.querySelector('.mat-prev').getContext('2d');
+  if (['wood', 'fabric', 'leather'].includes(spec.type)) ctx.drawImage(furnTexture(spec).image, 0, 0, 160, 160, 0, 0, 44, 44);
+  else { ctx.fillStyle = spec.color; ctx.fillRect(0, 0, 44, 44); }
+  el.querySelector('[data-fpreset]').onchange = e => { if (e.target.value) onChange({ ...FPRESETS[e.target.value] }); };
+  const rs = el.querySelector('[data-freset]');
+  if (rs) rs.onclick = () => onChange(null);
+  el.querySelectorAll('[data-fm]').forEach(inp => (inp.onchange = () => {
+    const k = inp.dataset.fm;
+    if (k === 'type') return onChange({ ...FTYPE_DEFAULTS[inp.value], color: spec.color, type: inp.value });
+    onChange({ ...spec, [k]: k === 'opacity' ? +inp.value : inp.value });
+  }));
+}
+
 // Material-Editor: Vorlage, Art, Farbe(n), Größe, Richtung, Oberfläche
 function matEditorHtml(id, spec, kind) {
   const types = kind === 'floor' ? FLOOR_TYPES : WALL_TYPES, presets = kind === 'floor' ? FLOOR_PRESETS : WALL_PRESETS;
@@ -1772,10 +2263,26 @@ function renderProps() {
       </div>
       ${numField('Drehung (°)', 'rot', it.rot, 'step="1"')}
       <div class="row"><button data-rot="-90">⟲ 90°</button><button data-rot="-15">⟲ 15°</button><button data-rot="15">⟳ 15°</button><button data-rot="90">⟳ 90°</button></div>
-      <label>Farbe <input type="color" data-f="color" value="${it.color}"></label>
+      ${furnOptionsHtml(it)}
+      <h3 style="margin-top:12px">Oberflächen</h3>
+      ${Object.entries(FURN[def.b].parts).map(([k, part]) => furnEditorHtml('fp_' + k, part.label, partSpec(it, k), part.kinds, !!it.parts?.[k])).join('')}
       <div class="row"><button id="pDup">Duplizieren</button><button id="pDel" class="danger">Löschen</button></div>
       <p class="hint">Ziehen zum Verschieben · R: 90° drehen · Shift+R: 15° · Entf: löschen · Strg+D: duplizieren</p>`;
     el.querySelector('#pReplace').onchange = e => replaceItem(it, e.target.value);
+    el.querySelectorAll('[data-o]').forEach(inp => (inp.onchange = () => {
+      const k = inp.dataset.o, o = FURN[def.b].opts[k];
+      let v = o.type === 'chk' ? inp.checked : o.type === 'num' ? Math.round(+inp.value) : inp.value;
+      if (o.type === 'num') { if (!isFinite(v)) return renderProps(); v = Math.min(o.max, Math.max(o.min, v)); }
+      pushUndo();
+      it.opts = { ...it.opts, [k]: v };
+      rebuildItem(it); renderProps(); scheduleSave();
+    }));
+    for (const k of Object.keys(FURN[def.b].parts)) bindFurnEditor('fp_' + k, partSpec(it, k), FURN[def.b].parts[k].kinds, spec => {
+      pushUndo();
+      it.parts = { ...it.parts };
+      if (spec) it.parts[k] = spec; else delete it.parts[k];
+      rebuildItem(it); renderProps(); scheduleSave();
+    });
     el.querySelectorAll('[data-rot]').forEach(b => (b.onclick = () => rotateSelection(+b.dataset.rot)));
     el.querySelector('#pDup').onclick = duplicateSelection;
     el.querySelector('#pDel').onclick = deleteSelection;

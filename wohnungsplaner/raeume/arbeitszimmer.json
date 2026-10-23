@@ -211,7 +211,11 @@
      "d": 0.5,
      "h": 1.8,
      "elev": 0,
-     "color": "#f2f0ea"
+     "color": "#f2f0ea",
+     "opts": {
+      "doors": 2,
+      "handle": "knopf"
+     }
     },
     {
      "id": "az011",
@@ -223,7 +227,22 @@
      "d": 0.35,
      "h": 1.9,
      "elev": 0,
-     "color": "#5c3a24"
+     "color": "#5c3a24",
+     "parts": {
+      "korpus": {
+       "type": "wood",
+       "color": "#5c3a24",
+       "gloss": "satin"
+      },
+      "rueck": {
+       "type": "wood",
+       "color": "#5c3a24",
+       "gloss": "satin"
+      }
+     },
+     "opts": {
+      "shelves": 5
+     }
     },
     {
      "id": "az012",
@@ -235,7 +254,22 @@
      "d": 0.35,
      "h": 1.1,
      "elev": 0,
-     "color": "#5c3a24"
+     "color": "#5c3a24",
+     "parts": {
+      "korpus": {
+       "type": "wood",
+       "color": "#5c3a24",
+       "gloss": "satin"
+      },
+      "rueck": {
+       "type": "wood",
+       "color": "#5c3a24",
+       "gloss": "satin"
+      }
+     },
+     "opts": {
+      "shelves": 3
+     }
     },
     {
      "id": "az013",
@@ -247,7 +281,36 @@
      "d": 0.5,
      "h": 1.05,
      "elev": 0,
-     "color": "#c98a45"
+     "color": "#c98a45",
+     "parts": {
+      "korpus": {
+       "type": "wood",
+       "color": "#c98a45",
+       "gloss": "satin"
+      },
+      "front": {
+       "type": "wood",
+       "color": "#c98a45",
+       "gloss": "satin"
+      },
+      "griffe": {
+       "type": "metal",
+       "color": "#b5913f",
+       "gloss": "satin"
+      },
+      "fuesse": {
+       "type": "wood",
+       "color": "#c98a45",
+       "gloss": "satin"
+      }
+     },
+     "opts": {
+      "drawers": 3,
+      "doors": 1,
+      "panels": true,
+      "base": "sockel",
+      "handle": "muschel"
+     }
     },
     {
      "id": "az014",
@@ -271,7 +334,32 @@
      "d": 0.6,
      "h": 2.0,
      "elev": 0,
-     "color": "#c27a3a"
+     "color": "#c27a3a",
+     "parts": {
+      "korpus": {
+       "type": "wood",
+       "color": "#c98a45",
+       "gloss": "satin"
+      },
+      "front": {
+       "type": "wood",
+       "color": "#c98a45",
+       "gloss": "satin"
+      },
+      "griffe": {
+       "type": "metal",
+       "color": "#b5913f",
+       "gloss": "satin"
+      }
+     },
+     "opts": {
+      "doors": 2,
+      "drawers": 1,
+      "panels": true,
+      "crown": true,
+      "base": "kugel",
+      "handle": "muschel"
+     }
     },
     {
      "id": "az016",
@@ -283,7 +371,22 @@
      "d": 0.3,
      "h": 1.9,
      "elev": 0,
-     "color": "#55595e"
+     "color": "#55595e",
+     "parts": {
+      "korpus": {
+       "type": "lack",
+       "color": "#55595e",
+       "gloss": "matt"
+      },
+      "rueck": {
+       "type": "lack",
+       "color": "#55595e",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "shelves": 10
+     }
     },
     {
      "id": "az017",
@@ -295,7 +398,29 @@
      "d": 0.8,
      "h": 1.05,
      "elev": 0,
-     "color": "#4a4d52"
+     "color": "#4a4d52",
+     "parts": {
+      "bezug": {
+       "type": "fabric",
+       "color": "#4a4d52",
+       "pattern": "uni"
+      },
+      "kissen": {
+       "type": "fabric",
+       "color": "#55585e",
+       "pattern": "uni"
+      },
+      "fuesse": {
+       "type": "metal",
+       "color": "#e1e4e8",
+       "gloss": "gloss"
+      }
+     },
+     "opts": {
+      "feet": "dreh",
+      "arms": "schmal",
+      "seats": 1
+     }
     },
     {
      "id": "az018",
@@ -307,7 +432,14 @@
      "d": 0.45,
      "h": 0.42,
      "elev": 0,
-     "color": "#4a4d52"
+     "color": "#4a4d52",
+     "parts": {
+      "main": {
+       "type": "fabric",
+       "color": "#4a4d52",
+       "pattern": "uni"
+      }
+     }
     },
     {
      "id": "az019",
@@ -319,7 +451,31 @@
      "d": 0.6,
      "h": 2.0,
      "elev": 0,
-     "color": "#8b5a2b"
+     "color": "#8b5a2b",
+     "parts": {
+      "korpus": {
+       "type": "wood",
+       "color": "#8b5a2b",
+       "gloss": "matt"
+      },
+      "front": {
+       "type": "wood",
+       "color": "#8b5a2b",
+       "gloss": "matt"
+      },
+      "griffe": {
+       "type": "metal",
+       "color": "#b5913f",
+       "gloss": "satin"
+      }
+     },
+     "opts": {
+      "doors": 2,
+      "panels": true,
+      "crown": true,
+      "base": "sockel",
+      "handle": "muschel"
+     }
     },
     {
      "id": "az020",
@@ -331,7 +487,22 @@
      "d": 0.6,
      "h": 0.75,
      "elev": 0,
-     "color": "#7a5232"
+     "color": "#7a5232",
+     "parts": {
+      "platte": {
+       "type": "wood",
+       "color": "#7a5232",
+       "gloss": "satin"
+      },
+      "beine": {
+       "type": "metal",
+       "color": "#2a2b2d",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "legs": "kufen"
+     }
     },
     {
      "id": "az021",
@@ -355,7 +526,22 @@
      "d": 0.8,
      "h": 0.75,
      "elev": 0,
-     "color": "#7a5232"
+     "color": "#7a5232",
+     "parts": {
+      "platte": {
+       "type": "wood",
+       "color": "#7a5232",
+       "gloss": "satin"
+      },
+      "beine": {
+       "type": "lack",
+       "color": "#1d1e20",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "legs": "wangen"
+     }
     },
     {
      "id": "az023",
@@ -367,7 +553,22 @@
      "d": 0.8,
      "h": 0.75,
      "elev": 0,
-     "color": "#7a5232"
+     "color": "#7a5232",
+     "parts": {
+      "platte": {
+       "type": "wood",
+       "color": "#7a5232",
+       "gloss": "satin"
+      },
+      "beine": {
+       "type": "lack",
+       "color": "#1d1e20",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "legs": "wangen"
+     }
     },
     {
      "id": "az024",
@@ -379,7 +580,23 @@
      "d": 0.6,
      "h": 1.2,
      "elev": 0,
-     "color": "#26282b"
+     "color": "#26282b",
+     "parts": {
+      "sitz": {
+       "type": "fabric",
+       "color": "#26282b",
+       "pattern": "uni"
+      },
+      "gestell": {
+       "type": "metal",
+       "color": "#2a2b2d",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "base": "buero",
+      "arms": true
+     }
     },
     {
      "id": "az025",
@@ -391,7 +608,23 @@
      "d": 0.65,
      "h": 1.3,
      "elev": 0,
-     "color": "#55595e"
+     "color": "#55595e",
+     "parts": {
+      "sitz": {
+       "type": "fabric",
+       "color": "#55595e",
+       "pattern": "uni"
+      },
+      "gestell": {
+       "type": "metal",
+       "color": "#2a2b2d",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "base": "buero",
+      "arms": true
+     }
     },
     {
      "id": "az026",
@@ -403,7 +636,23 @@
      "d": 0.6,
      "h": 1.1,
      "elev": 0,
-     "color": "#26282b"
+     "color": "#26282b",
+     "parts": {
+      "sitz": {
+       "type": "fabric",
+       "color": "#26282b",
+       "pattern": "uni"
+      },
+      "gestell": {
+       "type": "metal",
+       "color": "#2a2b2d",
+       "gloss": "matt"
+      }
+     },
+     "opts": {
+      "base": "buero",
+      "arms": true
+     }
     },
     {
      "id": "az027",
