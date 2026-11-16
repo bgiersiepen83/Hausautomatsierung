@@ -59,6 +59,11 @@
     background: rgba(255,255,255,.85); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
   }
   .room-label b { font-weight: 600; }
+  #measureLayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .dim-label {
+    position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; font-weight: 600; line-height: 1.3;
+    background: rgba(255,255,255,.92); border: 1px solid; border-radius: 4px; padding: 0 4px;
+  }
   #drawBar { position: absolute; top: 10px; right: 10px; display: none; gap: 6px; }
   #drawBar button { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   table.rooms { width: 100%; border-collapse: collapse; margin: 4px 0 8px; }
@@ -125,6 +130,7 @@
     <button data-tool="room" title="In einen umschlossenen Bereich klicken: Raum wird erkannt">Raum</button>
     <button data-tool="roomdraw" title="Raum als Polygon von Hand zeichnen">Raum ✎</button>
     <button data-tool="calibrate" title="Maßstab des Grundriss-Bildes festlegen">Maßstab</button>
+    <button data-tool="measure" title="Abstand zwischen zwei Punkten messen (M)">📏 Messen</button>
   </div>
   <div class="group">
     <span class="lbl">Grundriss-Bild</span>
@@ -175,6 +181,7 @@
 <main>
   <div id="viewport"></div>
   <div id="labels"></div>
+  <div id="measureLayer"></div>
   <div id="drawBar"><button id="drawDone" class="active">Fertig</button><button id="drawCancel">Abbrechen</button></div>
   <div id="status"><span id="hint"></span><span id="coords"></span></div>
   <div id="loadError">three.js konnte nicht geladen werden. Bitte Internetverbindung prüfen<br>(benötigt Zugriff auf cdn.jsdelivr.net).</div>
@@ -1029,6 +1036,7 @@ function setTool(t) {
   endChain();
   cancelRoomPolygon();
   draw.calib = []; calibLine.visible = false;
+  if (typeof resetMeasure === 'function') resetMeasure();
   updateDrawBar();
   canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
   rebuildHandles();
@@ -2007,6 +2015,7 @@ function updatePinch() {
   pinch = cur;
 }
 function updatePreview(p, e) {
+  if (tool === 'measure') return measurePreview(p, e);
   if (tool === 'wall' || tool === 'roomdraw') {
     const chain = tool === 'wall' ? draw.chain : draw.room;
     const sp = snapPoint(p, e.shiftKey, null, chain, e.pointerType === 'touch' ? 20 : 12);
@@ -2024,8 +2033,131 @@ function updatePreview(p, e) {
     updateHint(`Strecke: ${(dist(draw.calib[0], p) * 100).toFixed(0)} cm (aktueller Maßstab)`);
   }
 }
+// ---------------------------------------------------------------------------
+// Maßband (nur 2D): freies Messen zwischen zwei Punkten und Wandabstände des ausgewählten Möbels
+// ---------------------------------------------------------------------------
+const measureLayer = $('#measureLayer');
+const measure = { a: null, b: null, cur: null };
+const fmtCm = m => (Math.round(m * 1000) / 10).toLocaleString('de-DE') + ' cm';
+function makeDim(color) {
+  const geo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Array(18).fill(0), 3));
+  const line = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color, depthTest: false }));
+  line.renderOrder = 13; line.visible = false; line.frustumCulled = false;
+  scene.add(line);
+  const el = document.createElement('div');
+  el.className = 'dim-label';
+  el.style.color = el.style.borderColor = color;
+  el.style.display = 'none';
+  measureLayer.appendChild(el);
+  return { line, el };
+}
+// Maßlinie mit Endstrichen und Beschriftung in der Mitte
+function showDim(dim, a, b, text) {
+  const y = 3.3, dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1, s = pxToM(5), nx = (-dz / L) * s, nz = (dx / L) * s;
+  const p = dim.line.geometry.attributes.position;
+  [[a.x, a.z], [b.x, b.z], [a.x + nx, a.z + nz], [a.x - nx, a.z - nz], [b.x + nx, b.z + nz], [b.x - nx, b.z - nz]].forEach(([x, z], i) => p.setXYZ(i, x, y, z));
+  p.needsUpdate = true;
+  dim.line.visible = true;
+  const v = new THREE.Vector3((a.x + b.x) / 2, y, (a.z + b.z) / 2).project(camera());
+  dim.el.textContent = text;
+  dim.el.style.display = '';
+  dim.el.style.transform = `translate(${((v.x + 1) / 2) * canvas.clientWidth}px, ${((1 - v.y) / 2) * canvas.clientHeight}px) translate(-50%, -50%)`;
+}
+function hideDim(dim) { dim.line.visible = false; dim.el.style.display = 'none'; }
+const measureDim = makeDim('#d6336c');
+const itemDims = [0, 1, 2, 3].map(() => makeDim('#1971c2'));
+
+// Eckpunkte eines Möbels im Grundriss (gedreht)
+function itemCorners(it) {
+  const a = -THREE.MathUtils.degToRad(it.rot || 0), c = Math.cos(a), s = Math.sin(a);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => {
+    const lx = (sx * it.w) / 2, lz = (sz * it.d) / 2;
+    return { x: it.x + c * lx + s * lz, z: it.z - s * lx + c * lz };
+  });
+}
+// Wandflächen (beide Seiten jeder Wand) als Strecken
+function wallFaces() {
+  const out = [];
+  for (const w of state.walls) {
+    const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+    if (L < 1e-6) continue;
+    const nx = (-dz / L) * (w.t / 2), nz = (dx / L) * (w.t / 2);
+    for (const s of [1, -1]) out.push([{ x: w.a.x + s * nx, z: w.a.z + s * nz }, { x: w.b.x + s * nx, z: w.b.z + s * nz }]);
+  }
+  return out;
+}
+// Fangpunkt fürs Messen: Ecken (Raum, Wand, Möbel) vor Kanten vor waagerecht/senkrecht zum Startpunkt
+function measureSnap(raw, free, tolPx) {
+  const tol = pxToM(tolPx);
+  let best = null, bd = tol;
+  const pts = uniqueEndpoints().concat(...state.rooms.map(r => r.poly), ...items().map(itemCorners));
+  for (const q of pts) { const d = dist(raw, q); if (d < bd) { bd = d; best = { x: q.x, z: q.z }; } }
+  if (best) return { p: best, snapped: 'Ecke' };
+  const segs = wallFaces();
+  for (const r of state.rooms) r.poly.forEach((q, i) => segs.push([q, r.poly[(i + 1) % r.poly.length]]));
+  for (const it of items()) { const c = itemCorners(it); c.forEach((q, i) => segs.push([q, c[(i + 1) % 4]])); }
+  for (const [a, b] of segs) {
+    const { t, d } = pointSegment(raw, a, b);
+    if (d < bd) { bd = d; best = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t }; }
+  }
+  if (best) return { p: best, snapped: 'Kante' };
+  const A = measure.a && !measure.b ? measure.a : null;
+  if (A && !free) {
+    if (Math.abs(raw.z - A.z) < pxToM(10)) return { p: { x: raw.x, z: A.z }, snapped: 'waagerecht' };
+    if (Math.abs(raw.x - A.x) < pxToM(10)) return { p: { x: A.x, z: raw.z }, snapped: 'senkrecht' };
+  }
+  return { p: { x: raw.x, z: raw.z }, snapped: '' };
+}
+function measureText(a, b) {
+  const dx = Math.abs(b.x - a.x), dz = Math.abs(b.z - a.z), axis = dx < 0.0005 || dz < 0.0005;
+  return fmtCm(dist(a, b)) + (axis ? '' : `  (↔ ${fmtCm(dx)} · ↕ ${fmtCm(dz)})`);
+}
+function measureClick(raw, e) {
+  const { p } = measureSnap(raw, e.shiftKey, e.pointerType === 'touch' ? 20 : 12);
+  if (!measure.a || measure.b) { measure.a = p; measure.b = null; measure.cur = p; }
+  else { measure.b = p; updateHint(`Gemessen: ${measureText(measure.a, measure.b)}`); }
+}
+function measurePreview(raw, e) {
+  const { p, snapped } = measureSnap(raw, e.shiftKey, e.pointerType === 'touch' ? 20 : 12);
+  snapMarker.visible = !!snapped;
+  snapMarker.position.set(p.x, 3.2, p.z);
+  snapMarker.scale.setScalar(pxToM(7));
+  if (measure.a && !measure.b) { measure.cur = p; updateHint(`${measureText(measure.a, p)}${snapped ? ' · Fang: ' + snapped : ''}`); }
+}
+function resetMeasure() { measure.a = measure.b = measure.cur = null; hideDim(measureDim); }
+// Strahl vom Punkt o in Richtung dir bis zur nächsten Wandfläche
+function castToWall(o, dir, faces) {
+  let best = null;
+  for (const [p0, p1] of faces) {
+    const qx = p1.x - p0.x, qz = p1.z - p0.z, den = dir.x * qz - dir.z * qx;
+    if (Math.abs(den) < 1e-9) continue;
+    const wx = p0.x - o.x, wz = p0.z - o.z, t = (wx * qz - wz * qx) / den, s = (wx * dir.z - wz * dir.x) / den;
+    if (t > -1e-4 && s >= -1e-6 && s <= 1 + 1e-6 && (!best || t < best.d)) best = { d: t, p: { x: o.x + dir.x * t, z: o.z + dir.z * t } };
+  }
+  return best;
+}
+function updateMeasureDims() {
+  const on2d = mode === '2d';
+  if (on2d && measure.a && (measure.b || measure.cur) && tool === 'measure') {
+    const b = measure.b || measure.cur;
+    if (dist(measure.a, b) > 0.0005) showDim(measureDim, measure.a, b, measureText(measure.a, b)); else hideDim(measureDim);
+  } else hideDim(measureDim);
+  const it = on2d && tool === 'select' && selection?.kind === 'item' && getItem(selection.id);
+  if (!it) { itemDims.forEach(hideDim); return; }
+  const cs = itemCorners(it), faces = wallFaces();
+  [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dx, dz], i) => {
+    const key = dx ? 'x' : 'z', sign = dx || dz;
+    const ext = sign < 0 ? Math.min(...cs.map(c => c[key])) : Math.max(...cs.map(c => c[key]));
+    const at = cs.filter(c => Math.abs(c[key] - ext) < 1e-4);
+    const o = { x: at.reduce((s, c) => s + c.x, 0) / at.length, z: at.reduce((s, c) => s + c.z, 0) / at.length };
+    const hit = castToWall(o, { x: dx, z: dz }, faces);
+    if (hit && hit.d < 30) showDim(itemDims[i], o, hit.p, fmtCm(Math.max(0, hit.d))); else hideDim(itemDims[i]);
+  });
+}
+
 function toolAction(p, e) {
-  if (tool === 'wall') wallToolClick(p, e);
+  if (tool === 'measure') measureClick(p, e);
+  else if (tool === 'wall') wallToolClick(p, e);
   else if (tool === 'door' || tool === 'window') insertOpening(p, tool, e.pointerType === 'touch' ? 20 : 12);
   else if (tool === 'calibrate') calibrateClick(p);
   else if (tool === 'room') addRoomAt(p);
@@ -2134,6 +2266,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'escape') {
     if (draw.chain) endChain();
     else if (draw.room) cancelRoomPolygon();
+    else if (measure.a) resetMeasure();
     else { draw.calib = []; calibLine.visible = false; updateDrawBar(); select(null); }
   }
   else if (k === 'r') rotateSelection(e.shiftKey ? 15 : 90);
@@ -2141,6 +2274,7 @@ window.addEventListener('keydown', e => {
   else if (mode === '2d' && k === 'w') setTool('wall');
   else if (mode === '2d' && k === 't') setTool('door');
   else if (mode === '2d' && k === 'f') setTool('window');
+  else if (mode === '2d' && k === 'm') setTool('measure');
 });
 
 // ---------------------------------------------------------------------------
@@ -2671,6 +2805,7 @@ function updateHint(extra) {
     window: `Auf eine Wand klicken, um ein Fenster (${cmTxt(state.settings.windowWidth)} cm) einzusetzen`,
     calibrate: 'Zwei Punkte mit bekanntem Abstand anklicken (z. B. Enden einer bemaßten Wand)',
     room: 'In einen von Wänden umschlossenen Raum klicken/tippen – Raum und Fläche werden erkannt',
+    measure: 'Zwei Punkte anklicken/antippen – Abstand wird angezeigt · rastet an Ecken, Wand- und Möbelkanten sowie waagerecht/senkrecht ein · Shift: ohne Fang · Esc: löschen',
     roomdraw: 'Raumecken setzen · ersten Punkt erneut, Doppelklick, Enter oder „Fertig“ schließt den Raum',
   };
   const base = mode === '3d' ? 'Linke Maustaste/1 Finger: drehen · rechte Maustaste/2 Finger: verschieben + Zoom · Möbel anklicken und ziehen' : hints[tool];
@@ -2698,6 +2833,7 @@ renderer.setAnimationLoop(() => {
   if (mode === '2d') { const s = pxToM(9); handlesGroup.children.forEach(h => h.scale.set(s, s, 1)); }
   renderer.render(scene, camera());
   updateLabels();
+  updateMeasureDims();
 });
 
 // für automatisierte Tests

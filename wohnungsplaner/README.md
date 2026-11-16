@@ -37,7 +37,10 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
      - Betten: Kopfteil, Beine, Bettkasten
      - Küche: Fronten, Schubladen
    - **Oberflächen je Teil**, z. B. Korpus, Fronten, Griffe, Bezug, Kissen, Tischplatte, Beine: Holz (Kiefer, Eiche, Buche, Nussbaum …), Lack/Kunststoff, Metall (Edelstahl, Chrom, Schwarz, Messing), Glas (klar, getönt, milchig), Stoff mit Muster (uni, Leinen, Cord, Samt, Bouclé, Karo, Streifen, Fischgrät) und Leder, jeweils mit Farbe und Glanzgrad. „Standard wiederherstellen“ setzt ein Teil zurück.
-7. **Variante → „+ Kopie“**: Kopiert die aktuelle Einrichtung, um eine alternative Gestaltung auszuprobieren. Möbel und Oberflächen (Boden, Wände) gehören zur Variante. Wandverlauf und Räume gelten für alle Varianten.
+7. **📏 Messen** (nur im 2D-Grundriss):
+   - **Freies Messen:** Werkzeug „Messen“ (Taste `M`) wählen und zwei Punkte anklicken oder antippen. Angezeigt wird der Abstand in cm, bei schrägen Strecken zusätzlich die waagerechte (↔) und senkrechte (↕) Länge. Der Punkt rastet an Ecken ein (Raum-, Wand- und Möbelecken), sonst an Wand-, Raum- und Möbelkanten und waagerecht oder senkrecht zum ersten Punkt. Mit gedrückter `Shift`-Taste wird nicht gefangen. Die Messung ist vorübergehend: Der nächste Klick beginnt eine neue, `Esc` oder ein Werkzeugwechsel löscht sie.
+   - **Abstände am Möbel:** Ist ein Möbel ausgewählt (Werkzeug „Auswählen“), zeigen blaue Maßlinien den Abstand von jeder Möbelseite zur nächsten Wand: links, rechts, oben und unten. Beim Verschieben laufen die Werte mit. Gemessen wird bis zur Wandoberfläche.
+8. **Variante → „+ Kopie“**: Kopiert die aktuelle Einrichtung, um eine alternative Gestaltung auszuprobieren. Möbel und Oberflächen (Boden, Wände) gehören zur Variante. Wandverlauf und Räume gelten für alle Varianten.
 
 ## Bedienung
 
@@ -53,7 +56,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
 Bei Touch wird ein Wandpunkt erst beim Loslassen gesetzt. Du kannst den Finger also bis zur richtigen Stelle ziehen, eine Vorschaulinie zeigt die Länge.
 Auf schmalen Bildschirmen (Tablet hochkant, Handy) blendest du Möbelkatalog und Eigenschaften über **„☰ Panel“** als Bereich am unteren Rand ein.
 
-Tastenkürzel: `R` dreht um 90°, `Shift+R` um 15°, `Entf` löscht, `Strg+D` dupliziert, `Strg+Z` / `Strg+Y` macht rückgängig bzw. wiederholt. Werkzeuge: `V` Auswählen, `W` Wand, `T` Tür, `F` Fenster.
+Tastenkürzel: `R` dreht um 90°, `Shift+R` um 15°, `Entf` löscht, `Strg+D` dupliziert, `Strg+Z` / `Strg+Y` macht rückgängig bzw. wiederholt. Werkzeuge: `V` Auswählen, `W` Wand, `T` Tür, `F` Fenster, `M` Messen.
 
 In der 3D-Ansicht ist der Zoom auf 0,5 m bis 60 m Abstand zum Drehpunkt begrenzt. Die Schrittweite pro Mausrad-Rastung stellst du oben unter **„Zoom“** ein: fein 1 %, mittel 2 % (Standard) oder grob 5 %. Sie gilt unabhängig von Bildschirm und Browser-Zoom. Gerät die Ansicht trotzdem durcheinander, stellt **„Zentrieren“** sie wieder her.
 
