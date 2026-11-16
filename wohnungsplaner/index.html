@@ -146,6 +146,11 @@
       <option value="transparent">transparent</option>
       <option value="low">niedrig (1 m)</option>
     </select>
+    <span class="lbl">Licht</span>
+    <select id="lightMode" title="Grundhelligkeit der 3D-Ansicht">
+      <option value="day">Tag</option>
+      <option value="evening">Abend</option>
+    </select>
     <span class="lbl">Zoom</span>
     <select id="zoomStep" title="Schrittweite pro Mausrad-Rastung in der 3D-Ansicht">
       <option value="0.01">fein (1 %)</option>
@@ -167,6 +172,7 @@
     <button id="importJson">Import</button>
     <input type="file" id="jsonFile" accept="application/json,.json" hidden>
     <input type="file" id="roomFile" accept="application/json,.json" hidden>
+    <input type="file" id="photoFile" accept="image/*" hidden>
     <button id="resetAll" class="danger" title="Alles löschen und neu beginnen">Neu</button>
   </div>
 </header>
@@ -207,7 +213,7 @@ const DEFAULT_SETTINGS = {
   wallHeight: 2.5, wallThickness: 0.15,
   doorWidth: 0.9, doorHeight: 2.0,
   windowWidth: 1.2, windowSill: 0.9, windowTop: 2.1,
-  floorColor: '#d8c7a8', wallMode: 'full', zoomStep: 0.02,
+  floorColor: '#d8c7a8', wallMode: 'full', zoomStep: 0.02, lightMode: 'day',
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -447,6 +453,101 @@ const OPT = {
   sel: (label, options, def) => ({ type: 'sel', label, options, def }),
   chk: (label, def) => ({ type: 'chk', label, def }),
 };
+// Hilfen für die erweiterten Gegenstände
+const SCREEN = mat('#06080b', { roughness: 0.15 });
+// Zylinder mit Achse nach vorn (z), Unterkante wie gewohnt über y
+function cylZ(g, r, depth, x, y, z, m, opts) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(depth, 0.002), 32), toMat(m, opts));
+  mesh.rotation.x = Math.PI / 2; mesh.position.set(x, y, z);
+  mesh.castShadow = mesh.receiveShadow = true; g.add(mesh);
+  return mesh;
+}
+function addPlane(g, w, h, x, y, z, m) {
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(w, 0.01), Math.max(h, 0.01)), m);
+  mesh.position.set(x, y, z); mesh.receiveShadow = true; g.add(mesh);
+  return mesh;
+}
+function pot(g, it, r, h) { cyl(g, r, r * 0.78, h, 0, 0, 0, furnMaterial(partSpec(it, 'topf'))); cyl(g, r * 0.95, r * 0.95, 0.01, 0, h - 0.012, 0, '#4a3a2a'); }
+// Palmwedel: flaches, gebogenes Blatt aus Segmenten
+function leaf(g, M, x, y, z, ang, tilt, len, wid) {
+  const grp = new THREE.Group(); grp.position.set(x, y, z); grp.rotation.y = ang; g.add(grp);
+  const n = 6;
+  for (let i = 0; i < n; i++) {
+    const t = i / n, seg = new THREE.Mesh(new THREE.BoxGeometry(wid * (1 - t * 0.6), 0.004, len / n), M);
+    const a = tilt * 0.6 + t * tilt * 0.9;
+    seg.position.set(0, Math.cos(a) * (t * len) * 0.5 - t * t * len * 0.3, t * len * Math.sin(Math.min(1.2, a)) + len / n / 2);
+    seg.rotation.x = Math.min(1.4, a * 0.7); seg.castShadow = true; grp.add(seg);
+  }
+}
+// Licht der Lampen: Farbe, Helligkeit; die Szene hat einen festen Vorrat an Punktlichtern (siehe updateLamps)
+const LIGHT_COLORS = { warm: '#ffcf8a', neutral: '#fff1dc', kalt: '#dce8ff' };
+const LAMP_OPTS = {
+  on: OPT.chk('eingeschaltet', true),
+  lightColor: OPT.sel('Lichtfarbe', { warm: 'warmweiß', neutral: 'neutralweiß', kalt: 'kaltweiß' }, 'warm'),
+  brightness: OPT.num('Helligkeit (%)', 10, 300, 100),
+};
+function setLight(g, it, x, y, z) {
+  if (!optVal(it, 'on')) return;
+  g.userData.light = { pos: new THREE.Vector3(x, y, z), color: LIGHT_COLORS[optVal(it, 'lightColor')], intensity: (optVal(it, 'brightness') / 100) };
+}
+const glowCache = new Map();
+function glowMat(it, spec) {
+  const on = optVal(it, 'on'), col = LIGHT_COLORS[optVal(it, 'lightColor')], key = JSON.stringify([spec, on, col]);
+  if (!glowCache.has(key)) {
+    const m = furnMaterial(spec).clone();
+    if (on) { m.emissive = new THREE.Color(col); m.emissiveIntensity = spec.type === 'metal' ? 0.25 : 0.7; }
+    glowCache.set(key, m);
+  }
+  return glowCache.get(key);
+}
+// Bildmotive: im Browser erzeugt (zufällig je Bild) oder eigenes Foto
+const pictureCache = new Map();
+function pictureMaterial(it) {
+  const motif = optVal(it, 'motif'), photo = motif === 'foto' && it.opts?.photo;
+  const key = photo ? 'foto:' + hashStr(photo) : motif + ':' + it.id;
+  if (pictureCache.has(key)) return pictureCache.get(key);
+  let tex;
+  if (photo) tex = new THREE.TextureLoader().load(photo);
+  else {
+    const c = document.createElement('canvas'), N = 256; c.width = c.height = N;
+    const ctx = c.getContext('2d'), rand = rng(hashStr(key));
+    const pal = [['#e76f51', '#f4a261', '#e9c46a', '#2a9d8f', '#264653'], ['#d8e2dc', '#ffcad4', '#f4acb7', '#9d8189', '#ffe5d9'], ['#0b3954', '#087e8b', '#bfd7ea', '#ff5a5f', '#c81d25']][Math.floor(rand() * 3)];
+    if (motif === 'landschaft') {
+      const sky = ctx.createLinearGradient(0, 0, 0, N); sky.addColorStop(0, '#8fb8de'); sky.addColorStop(1, '#f4e3c3');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, N, N);
+      ctx.fillStyle = '#f6d365'; ctx.beginPath(); ctx.arc(N * (0.2 + rand() * 0.6), N * 0.3, N * 0.08, 0, 6.3); ctx.fill();
+      for (const [col, base] of [['#7d9b76', 0.55], ['#56735a', 0.68], ['#3c5240', 0.8]]) {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, N);
+        for (let x = 0; x <= N; x += 16) ctx.lineTo(x, N * base - Math.sin(x / 40 + rand() * 6) * N * 0.06 - rand() * 6);
+        ctx.lineTo(N, N); ctx.fill();
+      }
+    } else if (motif === 'flaechen') {
+      ctx.fillStyle = '#f5f2ea'; ctx.fillRect(0, 0, N, N);
+      const xs = [0, 0.3 + rand() * 0.2, 1].map(v => v * N), ys = [0, 0.35 + rand() * 0.3, 1].map(v => v * N);
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) if (rand() < 0.6) { ctx.fillStyle = pal[Math.floor(rand() * pal.length)]; ctx.fillRect(xs[i], ys[j], xs[i + 1] - xs[i], ys[j + 1] - ys[j]); }
+      ctx.strokeStyle = '#1d1d1d'; ctx.lineWidth = 6;
+      xs.slice(1, -1).forEach(x => { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, N); ctx.stroke(); });
+      ys.slice(1, -1).forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(N, y); ctx.stroke(); });
+    } else if (motif === 'foto') {
+      ctx.fillStyle = '#d9d6cf'; ctx.fillRect(0, 0, N, N); ctx.fillStyle = '#8a8680'; ctx.font = '22px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Foto laden', N / 2, N / 2);
+    } else {
+      ctx.fillStyle = pal[4]; ctx.fillRect(0, 0, N, N);
+      for (let i = 0; i < 9; i++) {
+        ctx.fillStyle = pal[Math.floor(rand() * 4)]; ctx.globalAlpha = 0.85; ctx.beginPath();
+        rand() < 0.5 ? ctx.arc(rand() * N, rand() * N, N * (0.08 + rand() * 0.22), 0, 6.3) : ctx.rect(rand() * N, rand() * N, N * (0.1 + rand() * 0.4), N * (0.05 + rand() * 0.2));
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    tex = new THREE.CanvasTexture(c);
+  }
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 });
+  pictureCache.set(key, m);
+  return m;
+}
+
 const FURN = {
   wardrobe: {
     parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Türen / Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } },
@@ -519,11 +620,55 @@ const FURN = {
   tv: { parts: { rahmen: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
   rug: { parts: { stoff: { label: 'Teppich', kinds: ['fabric'], def: it => sp('fabric', it.color, { pattern: 'uni' }) } }, opts: { shape: OPT.sel('Form', { eckig: 'eckig', rund: 'rund / oval' }, 'eckig') } },
   plant: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec } }, opts: {} },
-  lamp: { parts: { schirm: { label: 'Schirm', kinds: ['fabric', 'lack', 'metal', 'glass'], def: it => sp('fabric', it.color, { pattern: 'leinen' }) }, gestell: { label: 'Gestell', kinds: K_METAL, def: () => sp('metal', '#2a2b2d') } }, opts: {} },
+  lamp: { parts: { schirm: { label: 'Schirm', kinds: ['fabric', 'lack', 'metal', 'glass'], def: it => sp('fabric', it.color, { pattern: 'leinen' }) }, gestell: { label: 'Gestell', kinds: K_METAL, def: () => sp('metal', '#2a2b2d') } }, opts: { ...LAMP_OPTS } },
   bathtub: { parts: { korpus: { label: 'Wanne', kinds: ['lack'], def: mainSpec } }, opts: {} },
   shower: { parts: { korpus: { label: 'Duschtasse', kinds: ['lack'], def: mainSpec }, glas: { label: 'Duschwand', kinds: ['glass'], def: () => sp('glass', '#bfe0f2', { opacity: 0.3, gloss: 'gloss' }) } }, opts: {} },
   wc: { parts: { korpus: { label: 'Keramik', kinds: ['lack'], def: mainSpec } }, opts: {} },
   basin: { parts: { korpus: { label: 'Unterschrank', kinds: K_WOOD, def: mainSpec }, becken: { label: 'Waschbecken', kinds: ['lack'], def: () => sp('lack', '#ffffff', { gloss: 'gloss' }) } }, opts: {} },
+  // --- Bilder & Deko ---
+  picture: {
+    parts: { rahmen: { label: 'Rahmen', kinds: K_METAL, def: mainSpec } },
+    opts: { motif: OPT.sel('Motiv', { abstrakt: 'abstrakt', landschaft: 'Landschaft', flaechen: 'Farbflächen', foto: 'eigenes Foto' }, 'abstrakt'), passe: OPT.chk('Passepartout', true) },
+  },
+  mirror: { parts: { rahmen: { label: 'Rahmen', kinds: K_METAL, def: mainSpec } }, opts: { shape: OPT.sel('Form', { eckig: 'eckig', rund: 'rund / oval' }, 'eckig') } },
+  clock: { parts: { rahmen: { label: 'Rahmen', kinds: K_METAL, def: mainSpec } }, opts: {} },
+  wallshelf: { parts: { brett: { label: 'Brett', kinds: K_WOOD, def: mainSpec } }, opts: {} },
+  vase: { parts: { korpus: { label: 'Vase', kinds: ['glass', 'lack', 'metal'], def: mainSpec } }, opts: { flowers: OPT.chk('mit Zweigen', true) } },
+  books: { parts: {}, opts: { count: OPT.num('Anzahl Bücher', 1, 12, 5) } },
+  cushion: { parts: { bezug: { label: 'Bezug', kinds: K_SOFT, def: it => sp('fabric', it.color, { pattern: 'uni' }) } }, opts: {} },
+  curtain: { parts: { stoff: { label: 'Stoff', kinds: ['fabric'], def: it => sp('fabric', it.color, { pattern: 'leinen' }) } }, opts: { rod: OPT.chk('Vorhangstange', true) } },
+  // --- Elektronik ---
+  monitor: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  laptop: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: it => sp('metal', it.color) } }, opts: {} },
+  pctower: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  printer: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  speaker: { parts: { gehaeuse: { label: 'Gehäuse', kinds: K_WOOD, def: mainSpec } }, opts: {} },
+  soundbar: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  console: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  router: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  washer: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  dishwasher: { parts: { gehaeuse: { label: 'Front', kinds: ['lack', 'metal', 'wood'], def: mainSpec } }, opts: {} },
+  oven: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  microwave: { parts: { gehaeuse: { label: 'Gehäuse', kinds: ['lack', 'metal'], def: mainSpec } }, opts: {} },
+  // --- Lampen ---
+  ceilinglamp: {
+    parts: { schirm: { label: 'Leuchte / Schirm', kinds: ['lack', 'metal', 'glass', 'fabric'], def: mainSpec } },
+    opts: { shape: OPT.sel('Form', { rund: 'rund (flach)', eckig: 'eckig (flach)', rahmen: 'zwei Rahmen (LED)', pendel: 'Pendel' }, it => (it.type === 'pendant' ? 'pendel' : 'rund')), ...LAMP_OPTS },
+  },
+  desklamp: { parts: { gestell: { label: 'Gestell', kinds: K_METAL, def: mainSpec } }, opts: { ...LAMP_OPTS } },
+  arclamp: { parts: { schirm: { label: 'Schirm', kinds: ['metal', 'lack', 'fabric'], def: mainSpec }, gestell: { label: 'Bogen / Fuß', kinds: K_METAL, def: () => sp('metal', '#b8bcc2') } }, opts: { ...LAMP_OPTS } },
+  tablelamp: { parts: { schirm: { label: 'Schirm', kinds: ['fabric', 'lack', 'glass'], def: it => sp('fabric', it.color, { pattern: 'leinen' }) }, gestell: { label: 'Fuß', kinds: ['lack', 'metal', 'wood', 'glass'], def: () => sp('lack', '#cfc3b2') } }, opts: { ...LAMP_OPTS } },
+  walllamp: { parts: { schirm: { label: 'Schirm', kinds: ['fabric', 'lack', 'metal', 'glass'], def: mainSpec }, gestell: { label: 'Halterung', kinds: K_METAL, def: () => sp('metal', '#2a2b2d') } }, opts: { ...LAMP_OPTS } },
+  ledstrip: { parts: { schirm: { label: 'Profil', kinds: ['lack', 'metal'], def: () => sp('metal', '#d0d3d6') } }, opts: { ...LAMP_OPTS } },
+  // --- Pflanzen ---
+  palm: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Blätter', kinds: ['lack'], def: () => sp('lack', '#3f7a3a', { gloss: 'satin' }) } }, opts: {} },
+  monstera: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Blätter', kinds: ['lack'], def: () => sp('lack', '#2f6b33', { gloss: 'satin' }) } }, opts: {} },
+  ficus: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Blätter', kinds: ['lack'], def: () => sp('lack', '#3d6e34', { gloss: 'satin' }) } }, opts: {} },
+  cactus: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Kaktus', kinds: ['lack'], def: () => sp('lack', '#5a8a4a', { gloss: 'matt' }) } }, opts: {} },
+  snake: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Blätter', kinds: ['lack'], def: () => sp('lack', '#4e7a3c', { gloss: 'satin' }) } }, opts: {} },
+  hanging: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Ranken', kinds: ['lack'], def: () => sp('lack', '#4f8a3e', { gloss: 'satin' }) } }, opts: {} },
+  orchid: { parts: { topf: { label: 'Topf', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Blüten', kinds: ['lack'], def: () => sp('lack', '#e8a5c4', { gloss: 'satin' }) } }, opts: {} },
+  planter: { parts: { topf: { label: 'Kübel', kinds: K_ALL, def: mainSpec }, blatt: { label: 'Bepflanzung', kinds: ['lack'], def: () => sp('lack', '#4a7d3a', { gloss: 'matt' }) } }, opts: {} },
   box: { parts: { main: { label: 'Oberfläche', kinds: K_ALL, def: mainSpec } }, opts: {} },
 };
 function partSpec(it, key) {
@@ -778,7 +923,8 @@ const B = {
     const { w, h } = it, Ge = furnMaterial(partSpec(it, 'gestell'));
     cyl(g, w * 0.4, w * 0.4, 0.03, 0, 0, 0, Ge);
     cyl(g, 0.012, 0.012, h - 0.3, 0, 0.03, 0, Ge);
-    cyl(g, w * 0.32, w * 0.5, 0.3, 0, h - 0.3, 0, furnMaterial(partSpec(it, 'schirm')));
+    cyl(g, w * 0.32, w * 0.5, 0.3, 0, h - 0.3, 0, glowMat(it, partSpec(it, 'schirm')));
+    setLight(g, it, 0, h - 0.2, 0);
   },
   bathtub(g, it) {
     const { w, d, h } = it;
@@ -804,6 +950,289 @@ const B = {
     box(g, w, 0.12, d, 0, h - 0.12, 0, Be);
     box(g, w * 0.6, 0.01, d * 0.6, 0, h - 0.005, 0.02, '#dfe9ef', { roughness: 0.2 });
   },
+  // ---------------- Bilder & Deko ----------------
+  picture(g, it) {
+    const { w, d, h } = it, F = furnMaterial(partSpec(it, 'rahmen')), fw = Math.min(0.04, w * 0.08);
+    box(g, w, h, d, 0, 0, 0, F);
+    const pw = optVal(it, 'passe') ? Math.min(w, h) * 0.12 : 0;
+    if (pw) addPlane(g, w - 2 * fw, h - 2 * fw, 0, h / 2, d / 2 + 0.001, mat('#f6f4ef', { roughness: 0.9 }));
+    addPlane(g, w - 2 * fw - 2 * pw, h - 2 * fw - 2 * pw, 0, h / 2, d / 2 + 0.002, pictureMaterial(it));
+  },
+  mirror(g, it) {
+    const { w, d, h } = it, F = furnMaterial(partSpec(it, 'rahmen')), M = mat('#dfe7ec', { metalness: 1, roughness: 0.04 });
+    if (optVal(it, 'shape') === 'rund') {
+      const r = cylZ(g, 0.5, d, 0, h / 2, 0, F); r.scale.set(w, h, 1);
+      const m = cylZ(g, 0.5, 0.004, 0, h / 2, d / 2, M); m.scale.set(w - 0.06, h - 0.06, 1);
+    } else {
+      box(g, w, h, d, 0, 0, 0, F);
+      box(g, w - 0.06, h - 0.06, 0.004, 0, 0.03, d / 2, M);
+    }
+  },
+  clock(g, it) {
+    const { w, d, h } = it, r = Math.min(w, h) / 2, F = furnMaterial(partSpec(it, 'rahmen'));
+    cylZ(g, r, d, 0, h / 2, 0, F);
+    cylZ(g, r * 0.88, 0.004, 0, h / 2, d / 2, '#fbfaf7');
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2, m = box(g, 0.008, r * 0.12, 0.004, Math.sin(a) * r * 0.75, h / 2 - r * 0.06 + Math.cos(a) * r * 0.75, d / 2 + 0.003, '#222');
+      m.rotation.z = -a;
+    }
+    const hand = (len, wid, ang) => { const m = box(g, wid, len, 0.004, 0, 0, d / 2 + 0.006, '#111'); m.geometry.translate(0, len / 2 - len / 2, 0); m.position.set(Math.sin(ang) * len / 2, h / 2 + Math.cos(ang) * len / 2, d / 2 + 0.006); m.rotation.z = -ang; };
+    hand(r * 0.5, 0.012, 5.2); hand(r * 0.72, 0.008, 1.1);
+  },
+  wallshelf(g, it) {
+    const { w, d, h } = it, M = furnMaterial(partSpec(it, 'brett'));
+    box(g, w, h, d, 0, 0, 0, M);
+    box(g, w, 0.025, 0.012, 0, h, d / 2 - 0.006, M);
+  },
+  vase(g, it) {
+    const { w, h } = it, M = furnMaterial(partSpec(it, 'korpus'));
+    const pts = [[0, 0], [0.42, 0], [0.5, 0.25], [0.46, 0.6], [0.3, 0.85], [0.32, 1]].map(([r, y]) => new THREE.Vector2(r * w, y * h));
+    const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), M);
+    m.castShadow = m.receiveShadow = true; g.add(m);
+    if (optVal(it, 'flowers')) for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2, s = cyl(g, 0.004, 0.004, h * 0.9, Math.cos(a) * w * 0.12, h * 0.9, Math.sin(a) * w * 0.12, '#6b5a3a');
+      s.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3);
+      const b = new THREE.Mesh(new THREE.SphereGeometry(w * 0.18, 8, 6), mat('#9fb88a'));
+      b.position.set(Math.cos(a) * w * 0.45, h * 1.75, Math.sin(a) * w * 0.45); g.add(b);
+    }
+  },
+  books(g, it) {
+    const { w, d, h } = it, n = Math.max(1, Math.round(optVal(it, 'count'))), rand = rng(hashStr(it.id)), cols = ['#8c2f39', '#2f4b7c', '#e3b23c', '#3d6e5a', '#e8e1d3', '#5b3a6b', '#c75d2c', '#1f1f1f'];
+    let y = 0;
+    for (let i = 0; i < n; i++) {
+      const bh = (h / n) * (0.8 + rand() * 0.4), bw = w * (0.8 + rand() * 0.2), bd = d * (0.85 + rand() * 0.15);
+      const m = box(g, bw, bh, bd, (rand() - 0.5) * 0.02, y, (rand() - 0.5) * 0.02, cols[Math.floor(rand() * cols.length)]);
+      m.rotation.y = (rand() - 0.5) * 0.3; y += bh;
+    }
+  },
+  cushion(g, it) {
+    const { w, d, h } = it, m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 16), furnMaterial(partSpec(it, 'bezug')));
+    m.scale.set(w, h, d); m.position.y = h / 2; m.castShadow = m.receiveShadow = true; g.add(m);
+  },
+  curtain(g, it) {
+    const { w, d, h } = it, M = furnMaterial(partSpec(it, 'stoff')), n = Math.max(4, Math.round(w / 0.1));
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(w / n / 1.6, w / n / 1.6, h - 0.06, 10, 1, true), M);
+      m.position.set(-w / 2 + (i + 0.5) * (w / n), (h - 0.06) / 2, (i % 2 ? 0.01 : -0.01));
+      m.scale.z = 0.55; m.castShadow = m.receiveShadow = true; g.add(m);
+    }
+    if (optVal(it, 'rod')) { const r = cyl(g, 0.012, 0.012, w + 0.2, 0, h - 0.03, 0, '#2a2b2d'); r.rotation.z = Math.PI / 2; r.position.y = h - 0.03; }
+  },
+  // ---------------- Elektronik ----------------
+  monitor(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse')), sh = h * 0.7;
+    box(g, w * 0.35, 0.015, d * 0.9, 0, 0, 0, G);
+    box(g, 0.04, h - sh * 0.6, 0.03, 0, 0.015, -d * 0.2, G);
+    box(g, w, sh, 0.025, 0, h - sh, 0, G);
+    box(g, w - 0.02, sh - 0.02, 0.002, 0, h - sh + 0.01, 0.0135, SCREEN);
+  },
+  laptop(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, 0.018, d, 0, 0, 0, G);
+    box(g, w * 0.9, 0.002, d * 0.45, 0, 0.018, -d * 0.05, '#2a2b2d');
+    const lid = new THREE.Group(); lid.position.set(0, 0.018, -d / 2); lid.rotation.x = -0.25; g.add(lid);
+    box(lid, w, h - 0.02, 0.008, 0, 0, 0, G);
+    box(lid, w - 0.02, h - 0.04, 0.002, 0, 0.01, 0.005, SCREEN);
+  },
+  pctower(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w * 0.7, 0.01, 0.004, 0, h * 0.85, d / 2, '#5a8fd0');
+    cylZ(g, 0.008, 0.004, 0, h * 0.92, d / 2, '#9aa0a6');
+  },
+  printer(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h * 0.8, d, 0, 0, 0, G);
+    box(g, w * 0.8, 0.01, d * 0.5, 0, h * 0.8, -d * 0.1, '#3a3a3a');
+    box(g, w * 0.6, 0.004, 0.1, 0, h * 0.35, d / 2 + 0.05, '#ffffff');
+    box(g, w * 0.25, h * 0.15, 0.004, w * 0.3, h * 0.55, d / 2 + 0.002, '#222');
+  },
+  speaker(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w - 0.02, h - 0.04, 0.004, 0, 0.02, d / 2, '#2a2a2a');
+    for (const [y, r] of [[0.85, 0.035], [0.65, 0.075], [0.35, 0.075]]) cylZ(g, Math.min(r, w * 0.4), 0.01, 0, h * y, d / 2 + 0.002, '#111');
+  },
+  soundbar(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w - 0.02, h - 0.015, 0.003, 0, 0.007, d / 2, '#2a2a2a');
+  },
+  console(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w, 0.006, d, 0, h * 0.5, 0, '#1d1e20');
+    box(g, 0.02, 0.004, 0.004, w * 0.35, h * 0.7, d / 2 + 0.001, '#5a8fd0');
+  },
+  router(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    for (let i = 0; i < 4; i++) box(g, 0.012, 0.004, 0.003, -w * 0.3 + i * 0.03, h * 0.5, d / 2 + 0.001, '#4caf50');
+    for (const s of [-1, 1]) { const a = box(g, 0.012, 0.16, 0.012, s * w * 0.4, h, -d * 0.4, G); a.rotation.z = s * 0.2; }
+  },
+  washer(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse')), r = Math.min(w, h) * 0.3;
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w, 0.1, 0.004, 0, h - 0.12, d / 2, '#d9dcdf');
+    box(g, w * 0.25, 0.04, 0.006, -w * 0.25, h - 0.09, d / 2 + 0.003, '#222');
+    cylZ(g, r, 0.02, 0, h * 0.45, d / 2 + 0.01, '#b8bcc2', { metalness: 0.7, roughness: 0.3 });
+    cylZ(g, r * 0.78, 0.004, 0, h * 0.45, d / 2 + 0.021, '#3b4650', { roughness: 0.1 });
+    if (it.type === 'dryer') box(g, w * 0.3, 0.06, 0.004, w * 0.25, h - 0.11, d / 2 + 0.003, '#5a8fd0');
+  },
+  dishwasher(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, 0.1, d - 0.05, 0, 0, -0.025, '#4a4a4a');
+    box(g, w, h - 0.1, d, 0, 0.1, 0, G);
+    box(g, w - 0.06, 0.015, 0.025, 0, h - 0.08, d / 2 + 0.012, '#9aa0a6', { metalness: 0.6, roughness: 0.4 });
+  },
+  oven(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h - 0.01, d, 0, 0, 0, G);
+    box(g, w, 0.01, d, 0, h - 0.01, 0, '#111', { roughness: 0.15 });
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) cyl(g, 0.08, 0.08, 0.002, x * w * 0.22, h, z * d * 0.22, '#3a3a3a');
+    box(g, w - 0.08, h * 0.45, 0.006, 0, h * 0.2, d / 2 + 0.003, '#1e2328', { roughness: 0.1 });
+    box(g, w - 0.12, 0.015, 0.025, 0, h * 0.7, d / 2 + 0.013, '#9aa0a6', { metalness: 0.6, roughness: 0.4 });
+    for (let i = 0; i < 4; i++) cylZ(g, 0.015, 0.02, -w * 0.3 + i * w * 0.2, h * 0.85, d / 2 + 0.01, '#666');
+  },
+  microwave(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gehaeuse'));
+    box(g, w, h, d, 0, 0, 0, G);
+    box(g, w * 0.68, h * 0.8, 0.004, -w * 0.13, h * 0.1, d / 2 + 0.002, '#1e2328', { roughness: 0.1 });
+    box(g, w * 0.2, h * 0.6, 0.004, w * 0.36, h * 0.2, d / 2 + 0.002, '#2a2b2d');
+  },
+  // ---------------- Lampen ----------------
+  ceilinglamp(g, it) {
+    const { w, d, h } = it, shape = optVal(it, 'shape'), S = glowMat(it, partSpec(it, 'schirm'));
+    if (shape === 'pendel') {
+      cyl(g, 0.004, 0.004, h - 0.25, 0, 0.25, 0, '#222');
+      cyl(g, 0.05, 0.05, 0.02, 0, h - 0.02, 0, '#222');
+      cyl(g, w * 0.12, w / 2, 0.25, 0, 0, 0, S);
+      setLight(g, it, 0, 0.05, 0);
+    } else if (shape === 'rahmen') {
+      cyl(g, 0.05, 0.05, 0.03, 0, h - 0.03, 0, '#e9e9e9');
+      for (const [ox, oz, a] of [[-w * 0.12, -d * 0.1, 0.3], [w * 0.12, d * 0.1, 0.3]]) {
+        const fr = new THREE.Group(); fr.position.set(ox, h * 0.4, oz); fr.rotation.y = a; g.add(fr);
+        const s = w * 0.55;
+        for (const [x, z, bw, bd] of [[0, -s / 2, s, 0.02], [0, s / 2, s, 0.02], [-s / 2, 0, 0.02, s], [s / 2, 0, 0.02, s]]) box(fr, bw, 0.02, bd, x, 0, z, S);
+      }
+      setLight(g, it, 0, h * 0.3, 0);
+    } else {
+      if (shape === 'eckig') box(g, w, h, d, 0, 0, 0, S); else { const c = cyl(g, 0.5, 0.5, h, 0, 0, 0, S); c.scale.set(w, 1, d); }
+      setLight(g, it, 0, -0.05, 0);
+    }
+  },
+  desklamp(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gestell'));
+    cyl(g, w * 0.45, w * 0.5, 0.02, 0, 0, -d * 0.3, G);
+    const a1 = box(g, 0.015, h * 0.6, 0.015, 0, 0.02, -d * 0.3, G); a1.geometry.translate(0, 0, 0); a1.rotation.x = 0.35; a1.position.set(0, 0.02 + h * 0.28, -d * 0.2);
+    const a2 = box(g, 0.015, 0.015, d * 0.6, 0, h * 0.75, d * 0.05, G);
+    const head = cyl(g, 0.03, 0.06, 0.08, 0, h * 0.68, d * 0.35, glowMat(it, partSpec(it, 'gestell')));
+    void a2; void head;
+    setLight(g, it, 0, h * 0.62, d * 0.35);
+  },
+  arclamp(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gestell')), z0 = -d / 2 + 0.15, reach = d - 0.3;
+    box(g, 0.3, 0.06, 0.3, 0, 0, z0, '#ece9e2', { roughness: 0.4 });
+    const N = 24;
+    for (let i = 0; i < N; i++) {
+      const t0 = i / N, t1 = (i + 1) / N, p = t => new THREE.Vector3(0, 0.06 + Math.sin((t * Math.PI) / 2 * 1.4) * (h - 0.06) / Math.sin(0.7 * Math.PI), z0 + (1 - Math.cos((t * Math.PI) / 2)) * reach);
+      const a = p(t0), b = p(t1), len = a.distanceTo(b), m = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 8), G);
+      m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize()); m.castShadow = true; g.add(m);
+    }
+    const top = new THREE.Vector3(0, 0.06 + Math.sin(0.7 * Math.PI) * (h - 0.06) / Math.sin(0.7 * Math.PI), z0 + reach);
+    cyl(g, w * 0.15, w * 0.5, 0.22, 0, top.y - 0.35, top.z, glowMat(it, partSpec(it, 'schirm')));
+    setLight(g, it, 0, top.y - 0.42, top.z);
+  },
+  tablelamp(g, it) {
+    const { w, h } = it, F = furnMaterial(partSpec(it, 'gestell'));
+    const base = new THREE.Mesh(new THREE.SphereGeometry(w * 0.3, 20, 14), F); base.scale.y = (h * 0.55) / (w * 0.6); base.position.y = h * 0.275; base.castShadow = true; g.add(base);
+    cyl(g, w * 0.32, w * 0.5, h * 0.4, 0, h * 0.6, 0, glowMat(it, partSpec(it, 'schirm')));
+    setLight(g, it, 0, h * 0.7, 0);
+  },
+  walllamp(g, it) {
+    const { w, d, h } = it, G = furnMaterial(partSpec(it, 'gestell'));
+    box(g, 0.08, 0.12, 0.015, 0, h * 0.3, -d / 2 + 0.008, G);
+    box(g, 0.015, 0.015, d * 0.6, 0, h * 0.35, -d * 0.15, G);
+    cyl(g, w * 0.3, w * 0.5, h * 0.6, 0, h * 0.4, d * 0.1, glowMat(it, partSpec(it, 'schirm')));
+    setLight(g, it, 0, h * 0.5, d * 0.2);
+  },
+  ledstrip(g, it) {
+    const { w, d, h } = it;
+    box(g, w, h, d, 0, 0, 0, furnMaterial(partSpec(it, 'schirm')));
+    box(g, w - 0.01, h * 0.5, 0.002, 0, h * 0.25, d / 2 + 0.001, glowMat(it, sp('lack', '#ffffff')));
+    setLight(g, it, 0, h / 2, d / 2 + 0.1);
+  },
+  // ---------------- Pflanzen ----------------
+  palm(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), potH = Math.min(0.35, h * 0.22), r = Math.min(w, it.d) * 0.22;
+    pot(g, it, r, potH);
+    cyl(g, 0.02, 0.03, h * 0.45, 0, potH, 0, '#7a5a3a');
+    for (let i = 0; i < 9; i++) leaf(g, L, 0, potH + h * 0.45 * (0.6 + (i % 3) * 0.2), 0, (i / 9) * Math.PI * 2, 0.9 + (i % 3) * 0.25, w * 0.5, 0.07);
+  },
+  monstera(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), potH = Math.min(0.32, h * 0.28), r = Math.min(w, it.d) * 0.25, rand = rng(hashStr(it.id));
+    pot(g, it, r, potH);
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + rand(), rr = w * (0.15 + rand() * 0.25), y = potH + (h - potH) * (0.35 + rand() * 0.6);
+      const st = cyl(g, 0.006, 0.006, y - potH, Math.cos(a) * rr / 2, potH, Math.sin(a) * rr / 2, '#3d6e34'); st.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
+      const lf = new THREE.Mesh(new THREE.CircleGeometry(w * 0.16, 14), L);
+      lf.material.side = THREE.DoubleSide; lf.position.set(Math.cos(a) * rr, y, Math.sin(a) * rr);
+      lf.rotation.set(-Math.PI / 2 + 0.6, a, 0); lf.castShadow = true; g.add(lf);
+    }
+  },
+  ficus(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), potH = Math.min(0.32, h * 0.2), r = Math.min(w, it.d) * 0.28, rand = rng(hashStr(it.id));
+    pot(g, it, r, potH);
+    cyl(g, 0.02, 0.03, h * 0.5, 0, potH, 0, '#7a5a3a');
+    for (let i = 0; i < 7; i++) {
+      const s = new THREE.Mesh(new THREE.IcosahedronGeometry(w * (0.18 + rand() * 0.1), 1), L);
+      s.position.set((rand() - 0.5) * w * 0.5, h * (0.62 + rand() * 0.25), (rand() - 0.5) * w * 0.5); s.castShadow = true; g.add(s);
+    }
+  },
+  cactus(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), potH = Math.min(0.2, h * 0.25), r = Math.min(w, it.d) * 0.42;
+    pot(g, it, r, potH);
+    cyl(g, r * 0.55, r * 0.6, h - potH - 0.03, 0, potH, 0, L);
+    const s = new THREE.Mesh(new THREE.SphereGeometry(r * 0.55, 12, 8), L); s.position.y = h - 0.03; g.add(s);
+    for (const [sx, y, l] of [[1, 0.45, 0.25], [-1, 0.6, 0.18]]) {
+      cyl(g, r * 0.25, r * 0.25, h * l, sx * r * 0.85, potH + (h - potH) * y, 0, L);
+      const c = cyl(g, r * 0.25, r * 0.25, r * 0.5, sx * r * 0.55, potH + (h - potH) * y, 0, L); c.rotation.z = Math.PI / 2;
+    }
+  },
+  snake(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), potH = Math.min(0.2, h * 0.28), r = Math.min(w, it.d) * 0.42, rand = rng(hashStr(it.id));
+    pot(g, it, r, potH);
+    for (let i = 0; i < 9; i++) {
+      const bh = (h - potH) * (0.6 + rand() * 0.4), m = box(g, w * 0.12, bh, 0.008, (rand() - 0.5) * r, potH, (rand() - 0.5) * r, L);
+      m.rotation.set((rand() - 0.5) * 0.25, rand() * Math.PI, (rand() - 0.5) * 0.25);
+    }
+  },
+  hanging(g, it) {
+    const { w, h } = it, L = furnMaterial(partSpec(it, 'blatt')), r = Math.min(w, it.d) * 0.35, potY = h * 0.45, rand = rng(hashStr(it.id));
+    for (const a of [0, 2.1, 4.2]) { const c = cyl(g, 0.002, 0.002, h - potY - 0.15, Math.cos(a) * r * 0.5, potY + 0.15, Math.sin(a) * r * 0.5, '#9a8a6a'); c.rotation.set(-Math.sin(a) * 0.15, 0, Math.cos(a) * 0.15); }
+    cyl(g, r * 0.9, r * 0.7, 0.15, 0, potY, 0, furnMaterial(partSpec(it, 'topf')));
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2, len = potY * (0.6 + rand() * 0.5);
+      cyl(g, 0.012, 0.012, len, Math.cos(a) * r, potY + 0.12 - len, Math.sin(a) * r, L);
+    }
+    const top = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), L); top.scale.y = 0.5; top.position.y = potY + 0.15; g.add(top);
+  },
+  orchid(g, it) {
+    const { w, h } = it, B = furnMaterial(partSpec(it, 'blatt')), potH = h * 0.22, r = Math.min(w, it.d) * 0.45;
+    pot(g, it, r, potH);
+    for (const a of [0, 2.4]) { const l = box(g, w * 0.5, 0.004, w * 0.18, Math.cos(a) * w * 0.2, potH + 0.01, Math.sin(a) * w * 0.2, '#3d6e34'); l.rotation.y = -a; }
+    const st = cyl(g, 0.003, 0.003, h - potH, 0, potH, 0, '#4f6b3a'); st.rotation.z = 0.08;
+    for (let i = 0; i < 6; i++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), B); f.scale.z = 0.4; f.position.set(0.02 + i * 0.012, h * (0.62 + i * 0.06), 0.015); g.add(f); }
+  },
+  planter(g, it) {
+    const { w, d, h } = it, L = furnMaterial(partSpec(it, 'blatt')), kh = h * 0.55, rand = rng(hashStr(it.id));
+    box(g, w, kh, d, 0, 0, 0, furnMaterial(partSpec(it, 'topf')));
+    const n = Math.max(3, Math.round(w / 0.18));
+    for (let i = 0; i < n; i++) {
+      const s = new THREE.Mesh(new THREE.IcosahedronGeometry(Math.min(d * 0.55, (h - kh) * 0.6), 1), L);
+      s.position.set(-w / 2 + (i + 0.5) * (w / n), kh + (h - kh) * (0.35 + rand() * 0.2), (rand() - 0.5) * d * 0.2); s.castShadow = true; g.add(s);
+    }
+  },
   box(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, furnMaterial(partSpec(it, 'main'))); },
 };
 
@@ -814,12 +1243,12 @@ const CATALOG = {
   armchair:   { label: 'Sessel',         group: 'Wohnen',          w: 0.85, d: 0.85, h: 0.85, color: '#a0785a', b: 'sofa' },
   coffee:     { label: 'Couchtisch',     group: 'Wohnen',          w: 1.0,  d: 0.6,  h: 0.42, color: '#8b6a4a', b: 'table' },
   tvboard:    { label: 'TV-Board',       group: 'Wohnen',          w: 1.8,  d: 0.4,  h: 0.5,  color: '#e8e4dc', b: 'sideboard' },
-  tv:         { label: 'Fernseher',      group: 'Wohnen',          w: 1.23, d: 0.05, h: 0.71, color: '#1b1b1b', b: 'tv', elev: 0.5 },
+  tv:         { label: 'Fernseher',      group: 'Elektronik',          w: 1.23, d: 0.05, h: 0.71, color: '#1b1b1b', b: 'tv', elev: 0.5 },
   shelf:      { label: 'Regal',          group: 'Wohnen',          w: 0.8,  d: 0.35, h: 1.9,  color: '#d9cbb2', b: 'shelf' },
   sideboard:  { label: 'Sideboard',      group: 'Wohnen',          w: 1.6,  d: 0.45, h: 0.8,  color: '#7a5c43', b: 'sideboard' },
   rug:        { label: 'Teppich',        group: 'Wohnen',          w: 2.0,  d: 1.4,  h: 0.01, color: '#b8a99a', b: 'rug' },
-  lamp:       { label: 'Stehlampe',      group: 'Wohnen',          w: 0.4,  d: 0.4,  h: 1.6,  color: '#efe6d2', b: 'lamp' },
-  plant:      { label: 'Pflanze',        group: 'Wohnen',          w: 0.5,  d: 0.5,  h: 1.2,  color: '#c4b8a8', b: 'plant' },
+  lamp:       { label: 'Stehlampe',      group: 'Lampen',          w: 0.4,  d: 0.4,  h: 1.6,  color: '#efe6d2', b: 'lamp' },
+  plant:      { label: 'Pflanze (Busch)', group: 'Pflanzen',          w: 0.5,  d: 0.5,  h: 1.2,  color: '#c4b8a8', b: 'plant' },
   bed160:     { label: 'Doppelbett',     group: 'Schlafen',        w: 1.6,  d: 2.1,  h: 0.9,  color: '#9a8c7c', b: 'bed' },
   bed90:      { label: 'Einzelbett',     group: 'Schlafen',        w: 0.9,  d: 2.0,  h: 0.8,  color: '#9a8c7c', b: 'bed' },
   wardrobe:   { label: 'Kleiderschrank', group: 'Schlafen',        w: 2.0,  d: 0.6,  h: 2.2,  color: '#f0ede6', b: 'wardrobe' },
@@ -834,6 +1263,43 @@ const CATALOG = {
   shower:     { label: 'Dusche',         group: 'Bad',             w: 0.9,  d: 0.9,  h: 2.0,  color: '#fbfbfb', b: 'shower' },
   wc:         { label: 'WC',             group: 'Bad',             w: 0.38, d: 0.6,  h: 0.8,  color: '#fbfbfb', b: 'wc' },
   basin:      { label: 'Waschtisch',     group: 'Bad',             w: 0.8,  d: 0.48, h: 0.85, color: '#ffffff', b: 'basin' },
+  picture:    { label: 'Bild (hoch)',        group: 'Bilder & Deko', w: 0.6,  d: 0.03, h: 0.8,  color: '#2a2b2d', b: 'picture', elev: 1.1, wall: true },
+  picture_l:  { label: 'Bild groß (quer)',   group: 'Bilder & Deko', w: 1.2,  d: 0.03, h: 0.8,  color: '#c9a46b', b: 'picture', elev: 1.1, wall: true },
+  mirror:     { label: 'Spiegel',            group: 'Bilder & Deko', w: 0.6,  d: 0.03, h: 1.6,  color: '#c9a46b', b: 'mirror', elev: 0.4, wall: true },
+  clock:      { label: 'Wanduhr',            group: 'Bilder & Deko', w: 0.35, d: 0.05, h: 0.35, color: '#2a2b2d', b: 'clock', elev: 1.9, wall: true },
+  wallshelf:  { label: 'Wandregal / Bilderleiste', group: 'Bilder & Deko', w: 1.0, d: 0.2, h: 0.04, color: '#c9a46b', b: 'wallshelf', elev: 1.5, wall: true },
+  curtain:    { label: 'Vorhang',            group: 'Bilder & Deko', w: 1.4,  d: 0.08, h: 2.3,  color: '#e9e4da', b: 'curtain', elev: 0.02, wall: true },
+  vase:       { label: 'Vase',               group: 'Bilder & Deko', w: 0.15, d: 0.15, h: 0.3,  color: '#2f5f66', b: 'vase', elev: 0.75 },
+  books:      { label: 'Bücherstapel',       group: 'Bilder & Deko', w: 0.28, d: 0.21, h: 0.15, color: '#8c2f39', b: 'books', elev: 0.75 },
+  cushion:    { label: 'Kissen',             group: 'Bilder & Deko', w: 0.45, d: 0.15, h: 0.45, color: '#c3962f', b: 'cushion', elev: 0.45 },
+  monitor:    { label: 'Monitor',            group: 'Elektronik', w: 0.62, d: 0.2,  h: 0.5,  color: '#1d1e20', b: 'monitor', elev: 0.75 },
+  laptop:     { label: 'Laptop',             group: 'Elektronik', w: 0.34, d: 0.24, h: 0.23, color: '#9aa0a6', b: 'laptop', elev: 0.75 },
+  pctower:    { label: 'PC-Tower',           group: 'Elektronik', w: 0.2,  d: 0.45, h: 0.45, color: '#1d1e20', b: 'pctower' },
+  printer:    { label: 'Drucker',            group: 'Elektronik', w: 0.45, d: 0.38, h: 0.22, color: '#f2f0ea', b: 'printer', elev: 0.75 },
+  speaker:    { label: 'Standlautsprecher',  group: 'Elektronik', w: 0.22, d: 0.3,  h: 1.0,  color: '#2a2b2d', b: 'speaker' },
+  soundbar:   { label: 'Soundbar',           group: 'Elektronik', w: 0.9,  d: 0.1,  h: 0.07, color: '#1d1e20', b: 'soundbar', elev: 0.5 },
+  console:    { label: 'Spielkonsole',       group: 'Elektronik', w: 0.3,  d: 0.25, h: 0.07, color: '#f2f0ea', b: 'console', elev: 0.5 },
+  router:     { label: 'WLAN-Router',        group: 'Elektronik', w: 0.22, d: 0.15, h: 0.04, color: '#f2f0ea', b: 'router', elev: 0.75 },
+  washer:     { label: 'Waschmaschine',      group: 'Elektronik', w: 0.6,  d: 0.6,  h: 0.85, color: '#f7f7f5', b: 'washer' },
+  dryer:      { label: 'Wäschetrockner',     group: 'Elektronik', w: 0.6,  d: 0.6,  h: 0.85, color: '#f7f7f5', b: 'washer' },
+  dishwasher: { label: 'Geschirrspüler',     group: 'Elektronik', w: 0.6,  d: 0.6,  h: 0.85, color: '#f7f7f5', b: 'dishwasher' },
+  oven:       { label: 'Herd mit Backofen',  group: 'Elektronik', w: 0.6,  d: 0.6,  h: 0.9,  color: '#f7f7f5', b: 'oven' },
+  microwave:  { label: 'Mikrowelle',         group: 'Elektronik', w: 0.5,  d: 0.38, h: 0.3,  color: '#1d1e20', b: 'microwave', elev: 0.9 },
+  ceiling:    { label: 'Deckenleuchte',      group: 'Lampen', w: 0.45, d: 0.45, h: 0.08, color: '#f2f0ea', b: 'ceilinglamp', ceiling: true },
+  pendant:    { label: 'Pendelleuchte',      group: 'Lampen', w: 0.4,  d: 0.4,  h: 0.8,  color: '#2a2b2d', b: 'ceilinglamp', ceiling: true },
+  desklamp:   { label: 'Schreibtischlampe',  group: 'Lampen', w: 0.2,  d: 0.45, h: 0.5,  color: '#2a2b2d', b: 'desklamp', elev: 0.75 },
+  arclamp:    { label: 'Bogenlampe',         group: 'Lampen', w: 0.4,  d: 1.6,  h: 2.0,  color: '#b8bcc2', b: 'arclamp' },
+  tablelamp:  { label: 'Tischlampe',         group: 'Lampen', w: 0.3,  d: 0.3,  h: 0.5,  color: '#efe6d2', b: 'tablelamp', elev: 0.75 },
+  walllamp:   { label: 'Wandleuchte',        group: 'Lampen', w: 0.2,  d: 0.15, h: 0.25, color: '#efe6d2', b: 'walllamp', elev: 1.8, wall: true },
+  ledstrip:   { label: 'LED-Leiste',         group: 'Lampen', w: 1.5,  d: 0.02, h: 0.02, color: '#ffffff', b: 'ledstrip', elev: 2.2, wall: true },
+  palm:       { label: 'Zimmerpalme',        group: 'Pflanzen', w: 0.8,  d: 0.8,  h: 1.7,  color: '#c4b8a8', b: 'palm' },
+  monstera:   { label: 'Monstera',           group: 'Pflanzen', w: 0.8,  d: 0.8,  h: 1.1,  color: '#f2f0ea', b: 'monstera' },
+  ficus:      { label: 'Ficus (Bäumchen)',   group: 'Pflanzen', w: 0.6,  d: 0.6,  h: 1.6,  color: '#3f4246', b: 'ficus' },
+  cactus:     { label: 'Kaktus',             group: 'Pflanzen', w: 0.3,  d: 0.3,  h: 0.9,  color: '#c87f5a', b: 'cactus' },
+  snake:      { label: 'Bogenhanf',          group: 'Pflanzen', w: 0.35, d: 0.35, h: 0.8,  color: '#f2f0ea', b: 'snake' },
+  hanging:    { label: 'Hängepflanze',       group: 'Pflanzen', w: 0.35, d: 0.35, h: 0.9,  color: '#e9e4da', b: 'hanging', ceiling: true },
+  orchid:     { label: 'Orchidee',           group: 'Pflanzen', w: 0.15, d: 0.15, h: 0.55, color: '#f2f0ea', b: 'orchid', elev: 0.75 },
+  planter:    { label: 'Pflanzkübel',        group: 'Pflanzen', w: 1.0,  d: 0.35, h: 0.7,  color: '#55595e', b: 'planter' },
   box:        { label: 'Quader (frei)',  group: 'Sonstiges',       w: 1.0,  d: 1.0,  h: 1.0,  color: '#9a9a9a', b: 'box' },
 };
 
@@ -921,7 +1387,8 @@ const canvas = renderer.domElement;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#eef1f4');
-scene.add(new THREE.HemisphereLight('#ffffff', '#b9b1a3', 1.4));
+const hemi = new THREE.HemisphereLight('#ffffff', '#b9b1a3', 1.4);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight('#ffffff', 1.6);
 sun.position.set(6, 12, 8);
 sun.castShadow = true;
@@ -1458,11 +1925,33 @@ function newWall(a, b) {
   const s = state.settings;
   return { id: uid(), type: 'wall', a: { ...a }, b: { ...b }, t: s.wallThickness, h: s.wallHeight };
 }
+// Wandgegenstände an die nächste Wandfläche setzen, Vorderseite zeigt von der Wand weg
+function snapToWall(it, maxDist) {
+  let best = null, bd = maxDist;
+  for (const w of state.walls) {
+    const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+    if (L < 1e-6) continue;
+    for (const s of [1, -1]) {
+      const nx = (-dz / L) * s, nz = (dx / L) * s, o = w.t / 2;
+      const a = { x: w.a.x + nx * o, z: w.a.z + nz * o }, b = { x: w.b.x + nx * o, z: w.b.z + nz * o };
+      const { t, d } = pointSegment(it, a, b);
+      if (d < bd) { bd = d; best = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, nx, nz }; }
+    }
+  }
+  if (!best) return false;
+  const off = it.d / 2 + 0.002;
+  it.x = Math.round((best.x + best.nx * off) * 1000) / 1000;
+  it.z = Math.round((best.z + best.nz * off) * 1000) / 1000;
+  it.rot = Math.round((((-Math.atan2(best.nx, best.nz) * 180) / Math.PI) % 360 + 360) % 360 * 10) / 10 % 360;
+  return true;
+}
 function addItem(type, at) {
   const d = CATALOG[type];
   const p = at || viewCenter();
   pushUndo();
   const it = { id: uid(), type, x: round2(p.x), z: round2(p.z), rot: 0, w: d.w, d: d.d, h: d.h, elev: d.elev || 0, color: d.color };
+  if (d.ceiling) it.elev = round2(Math.max(0, state.settings.wallHeight - d.h));
+  if (d.wall) snapToWall(it, Infinity);
   items().push(it);
   rebuildItem(it);
   select({ kind: 'item', id: it.id });
@@ -2186,8 +2675,10 @@ window.addEventListener('pointermove', e => {
     const it = getItem(drag.id);
     if (!drag.moved) { pushUndo(); drag.moved = true; }
     it.x = round2(p.x + drag.ox); it.z = round2(p.z + drag.oz);
+    if (CATALOG[it.type].wall) snapToWall(it, 0.6);
     const g = itemObjects.get(it.id);
     g.position.x = it.x; g.position.z = it.z;
+    g.rotation.y = -THREE.MathUtils.degToRad(it.rot);
     updateSelectionHelper();
     return;
   }
@@ -2280,11 +2771,21 @@ window.addEventListener('keydown', e => {
 // ---------------------------------------------------------------------------
 // Seitenleiste: Katalog & Eigenschaften
 // ---------------------------------------------------------------------------
+const GROUP_ORDER = ['Wohnen', 'Schlafen', 'Essen & Arbeiten', 'Küche', 'Bad', 'Bilder & Deko', 'Elektronik', 'Lampen', 'Pflanzen', 'Sonstiges'];
 function renderCatalog() {
   const groups = {};
   for (const [k, d] of Object.entries(CATALOG)) (groups[d.group] ||= []).push([k, d]);
-  $('#catalog').innerHTML = Object.entries(groups).map(([g, list]) =>
-    `<div class="cat-group">${g}</div><div class="catalog">${list.map(([k, d]) => `<button data-add="${k}" title="${cmTxt(d.w)} × ${cmTxt(d.d)} × ${cmTxt(d.h)} cm">${d.label}</button>`).join('')}</div>`).join('');
+  const names = Object.keys(groups).sort((a, b) => (GROUP_ORDER.indexOf(a) + 99) % 99 - (GROUP_ORDER.indexOf(b) + 99) % 99);
+  $('#catalog').innerHTML = `<input type="text" id="catSearch" placeholder="Suchen, z. B. Lampe, Monstera …" style="width:100%;margin-bottom:4px">` + names.map(g =>
+    `<div class="cat-sec"><div class="cat-group">${g}</div><div class="catalog">${groups[g].map(([k, d]) => `<button data-add="${k}" title="${cmTxt(d.w)} × ${cmTxt(d.d)} × ${cmTxt(d.h)} cm${d.wall ? ' · rastet an der Wand ein' : ''}${d.ceiling ? ' · hängt an der Decke' : ''}">${d.label}</button>`).join('')}</div></div>`).join('');
+  $('#catSearch').oninput = e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#catalog .cat-sec').forEach(sec => {
+      let any = false;
+      sec.querySelectorAll('[data-add]').forEach(b => { const hit = !q || b.textContent.toLowerCase().includes(q) || sec.querySelector('.cat-group').textContent.toLowerCase().includes(q); b.style.display = hit ? '' : 'none'; any ||= hit; });
+      sec.style.display = any ? '' : 'none';
+    });
+  };
   $('#catalog').addEventListener('click', e => {
     const b = e.target.closest('[data-add]');
     if (!b) return;
@@ -2474,6 +2975,27 @@ function bindMatEditor(id, spec, kind, onChange) {
   }));
 }
 
+// Eigenes Foto für ein Bild: auf max. 800 px verkleinert, im Möbel gespeichert
+let photoTarget = null;
+$('#photoFile').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  const it = photoTarget && getItem(photoTarget);
+  if (!file || !it) return;
+  const img = new Image();
+  img.onload = () => {
+    const sc = Math.min(1, 800 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+    c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    pushUndo();
+    it.opts = { ...it.opts, motif: 'foto', photo: c.toDataURL('image/jpeg', 0.85) };
+    rebuildItem(it); renderProps(); scheduleSave();
+    URL.revokeObjectURL(img.src);
+  };
+  img.onerror = () => flash('Bild konnte nicht gelesen werden.');
+  img.src = URL.createObjectURL(file);
+};
+
 function renderProps() {
   const el = $('#props');
   if (selection?.kind === 'item') {
@@ -2496,11 +3018,15 @@ function renderProps() {
       ${numField('Drehung (°)', 'rot', it.rot, 'step="1"')}
       <div class="row"><button data-rot="-90">⟲ 90°</button><button data-rot="-15">⟲ 15°</button><button data-rot="15">⟳ 15°</button><button data-rot="90">⟳ 90°</button></div>
       ${furnOptionsHtml(it)}
+      ${def.b === 'picture' ? '<div class="row"><button id="pPhoto">Eigenes Foto als Motiv laden…</button></div>' : ''}
+      ${def.wall ? '<p class="hint">Rastet beim Ziehen an der nächsten Wand ein (bis 60 cm Abstand).</p>' : ''}
       <h3 style="margin-top:12px">Oberflächen</h3>
       ${Object.entries(FURN[def.b].parts).map(([k, part]) => furnEditorHtml('fp_' + k, part.label, partSpec(it, k), part.kinds, !!it.parts?.[k])).join('')}
       <div class="row"><button id="pDup">Duplizieren</button><button id="pDel" class="danger">Löschen</button></div>
       <p class="hint">Ziehen zum Verschieben · R: 90° drehen · Shift+R: 15° · Entf: löschen · Strg+D: duplizieren</p>`;
     el.querySelector('#pReplace').onchange = e => replaceItem(it, e.target.value);
+    const ph = el.querySelector('#pPhoto');
+    if (ph) ph.onclick = () => { photoTarget = it.id; $('#photoFile').click(); };
     el.querySelectorAll('[data-o]').forEach(inp => (inp.onchange = () => {
       const k = inp.dataset.o, o = FURN[def.b].opts[k];
       let v = o.type === 'chk' ? inp.checked : o.type === 'num' ? Math.round(+inp.value) : inp.value;
@@ -2716,9 +3242,11 @@ function syncHeaderInputs() {
   $('#plan3d').checked = state.plan.show3d;
   $('#wallMode').value = state.settings.wallMode;
   $('#zoomStep').value = String(state.settings.zoomStep);
+  $('#lightMode').value = state.settings.lightMode;
 }
 $('#planOpacity').oninput = e => { state.plan.opacity = +e.target.value; rebuildPlan(); scheduleSave(); };
 $('#plan3d').onchange = e => { state.plan.show3d = e.target.checked; rebuildPlan(); scheduleSave(); };
+$('#lightMode').onchange = e => { state.settings.lightMode = e.target.value; scheduleSave(); };
 $('#zoomStep').onchange = e => { state.settings.zoomStep = +e.target.value; scheduleSave(); };
 $('#wallMode').onchange = e => { state.settings.wallMode = e.target.value; rebuildWalls(); scheduleSave(); };
 
@@ -2824,7 +3352,29 @@ fitView();
 setTool('select');
 updateUndoButtons();
 
+// Fester Vorrat an Punktlichtern (Anzahl ändert sich nie -> keine Shader-Neuberechnung); zugeteilt an die 8 Lampen
+// nächst dem 3D-Drehpunkt. Im 2D-Grundriss aus, damit der Plan klar bleibt.
+const lampPool = Array.from({ length: 8 }, () => { const l = new THREE.PointLight('#ffffff', 0, 9, 2); scene.add(l); return l; });
+function updateLamps() {
+  const evening = state.settings.lightMode === 'evening';
+  hemi.intensity = mode === '3d' && evening ? 0.18 : 1.4;
+  sun.intensity = mode === '3d' && evening ? 0.08 : 1.6;
+  scene.background.set(mode === '3d' && evening ? '#1c2027' : '#eef1f4');
+  const list = [];
+  if (mode === '3d') for (const g of itemObjects.values()) if (g.userData.light) list.push(g);
+  const t = controls.target;
+  list.sort((a, b) => a.position.distanceToSquared(t) - b.position.distanceToSquared(t));
+  lampPool.forEach((l, i) => {
+    const g = list[i];
+    if (!g) { l.intensity = 0; return; }
+    g.updateMatrixWorld();
+    l.position.copy(g.userData.light.pos).applyMatrix4(g.matrixWorld);
+    l.color.set(g.userData.light.color);
+    l.intensity = g.userData.light.intensity * (evening ? 2.5 : 1.2);
+  });
+}
 renderer.setAnimationLoop(() => {
+  updateLamps();
   if (mode === '3d') {
     stepZoom();
     controls.update();
