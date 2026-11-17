@@ -60,6 +60,7 @@
   }
   .room-label b { font-weight: 600; }
   #measureLayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .dim-label.door-warn { color: #e03131; border-color: #e03131; }
   .dim-label {
     position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; font-weight: 600; line-height: 1.3;
     background: rgba(255,255,255,.92); border: 1px solid; border-radius: 4px; padding: 0 4px;
@@ -682,6 +683,18 @@ const FURN = {
       drawers: OPT.chk('Bettkasten (Schubladen)', false),
     },
   },
+  secretary: {
+    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Klappe / Fronten', kinds: K_WOOD, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec }, innen: { label: 'Innenfächer', kinds: K_WOOD, def: () => sp('lack', '#eee8dc', { gloss: 'matt' }) } },
+    opts: {
+      style: OPT.sel('Stil', { klassisch: 'klassisch (Schrägklappe)', modern: 'modern (gerade Klappe)' }, 'klassisch'),
+      open: OPT.chk('Schreibklappe offen', false),
+      drawers: OPT.num('Schubladen unten', 1, 4, 3),
+      topper: OPT.sel('Aufsatz', { ohne: 'ohne', regal: 'offenes Regal', tueren: 'mit Türen' }, 'ohne'),
+      panels: OPT.chk('Kassettenfront', false),
+      base: OPT.sel('Unterbau', { sockel: 'Sockel', fuesse: 'Füße', kugel: 'Kugelfüße', ohne: 'ohne' }, 'sockel'),
+      handle: OPT.sel('Griffe', HANDLES, 'knopf'),
+    },
+  },
   kitchen: {
     parts: { front: { label: 'Fronten', kinds: K_FRONT, def: mainSpec }, platte: { label: 'Arbeitsplatte', kinds: ['wood', 'lack', 'metal'], def: () => sp('lack', '#bdb6aa', { gloss: 'satin' }) }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } },
     opts: { fronts: OPT.num('Anzahl Fronten', 1, 12, it => Math.max(1, Math.round(it.w / 0.6))), drawersTop: OPT.chk('Schubladen oben', false), handle: OPT.sel('Griffe', HANDLES, 'stange') },
@@ -974,6 +987,83 @@ const B = {
     const n = w > 1.2 ? 2 : 1, pw = (w - 0.2) / n - 0.05;
     for (let i = 0; i < n; i++) box(g, pw, 0.12, 0.35, -w / 2 + 0.1 + (i + 0.5) * (w - 0.2) / n, frame + 0.2, -d / 2 + 0.33, Wa);
     box(g, w - 0.02, 0.06, (d - 0.1) * 0.62, 0, frame + 0.2, d / 2 - (d - 0.1) * 0.31 - 0.04, Wa);
+  },
+  secretary(g, it) {
+    const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
+    const K = P('korpus'), F = P('front'), Gm = P('griffe'), I = P('innen'), open = o('open'), classic = o('style') === 'klassisch';
+    const baseH = baseHeight(o('base'));
+    baseFeet(g, o('base'), w, d, baseH, K);
+    const hb = Math.min(Math.max(0.55, h * 0.68), h - 0.2), zf = d / 2, t = 0.02;
+    // Unterteil mit Schubladen
+    box(g, w, hb - baseH, d - 0.02, 0, baseH, -0.01, K);
+    const n = Math.max(1, Math.round(o('drawers'))), dh = (hb - baseH) / n;
+    for (let i = 0; i < n; i++) {
+      frontPanel(g, w - 0.006, dh - 0.006, 0, baseH + i * dh + 0.003, zf, F, false);
+      handle(g, o('handle'), 0, baseH + (i + 0.5) * dh, zf + 0.012, false, Gm);
+    }
+    const upD = classic ? d * 0.55 : d - 0.02, uh = h - hb, zb = -d / 2;
+    // Innenleben: Fächer und kleine Schubladen
+    const inner = (iw, ih, idp, y0) => {
+      const zc = zb + 0.01 + idp / 2, sdh = ih * 0.3, cols = Math.max(3, Math.round(iw / 0.18));
+      box(g, iw, sdh, idp - 0.012, 0, y0, zc - 0.006, I);
+      for (let c = 0; c < cols; c++) {
+        const x = -iw / 2 + ((c + 0.5) * iw) / cols;
+        box(g, iw / cols - 0.006, sdh - 0.006, 0.012, x, y0 + 0.003, zc + idp / 2 - 0.006, F);
+        box(g, 0.015, 0.015, 0.015, x, y0 + sdh / 2 - 0.0075, zc + idp / 2 + 0.007, Gm);
+      }
+      for (const y of [y0 + sdh, y0 + sdh + (ih - sdh) / 2, y0 + ih - 0.01]) box(g, iw, 0.01, idp, 0, y, zc, I);
+      for (let c = 0; c <= cols; c++) box(g, 0.01, ih - sdh, idp, -iw / 2 + (c * iw) / cols, y0 + sdh, zc, I);
+    };
+    if (classic) {
+      // Seitenwangen schräg, Deckel, Rückwand
+      const sh = new THREE.Shape([[-d / 2, 0], [d / 2, 0], [d / 2 - (d - upD), uh], [-d / 2, uh]].map(([z, y]) => new THREE.Vector2(z, y)));
+      for (const s of [-1, 1]) {
+        const m = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false }), K);
+        m.rotation.y = -Math.PI / 2; m.position.set(s > 0 ? w / 2 : -w / 2 + t, hb, 0); m.castShadow = m.receiveShadow = true; g.add(m);
+      }
+      box(g, w, t, upD, 0, h - t, zb + upD / 2, K);
+      box(g, w - 2 * t, uh - t, 0.01, 0, hb, zb + 0.005, K);
+      inner(w - 2 * t, uh * 0.85, upD * 0.75, hb);
+      const L = Math.hypot(d - upD, uh);
+      if (open) {
+        box(g, w - 0.04, t, L, 0, hb - t, zf + L / 2, F);
+        box(g, w - 0.24, 0.003, L * 0.8, 0, hb, zf + L / 2, '#3d5a40', { roughness: 0.95 });
+        for (const s of [-1, 1]) box(g, 0.04, 0.035, L * 0.55, s * (w / 2 - 0.08), hb - 0.055, zf + L * 0.27, K);
+      } else {
+        const flap = new THREE.Group(), my = hb + uh / 2, mz = zf - (d - upD) / 2;
+        flap.position.set(0, my + ((d - upD) / L) * 0.01, mz + (uh / L) * 0.01);
+        flap.rotation.x = Math.atan2(-(d - upD), uh);
+        g.add(flap);
+        box(flap, w - 0.04, L, t, 0, -L / 2, 0, F);
+        if (o('panels')) box(flap, w - 0.16, L - 0.12, 0.012, 0, -L / 2 + 0.06, 0.012, F);
+        box(flap, 0.03, 0.05, 0.02, 0, L * 0.3, 0.018, Gm);
+      }
+    } else {
+      for (const s of [-1, 1]) box(g, t, uh, d - 0.02, s * (w / 2 - t / 2), hb, -0.01, K);
+      box(g, w, t, d - 0.02, 0, h - t, -0.01, K);
+      box(g, w - 2 * t, uh - t, 0.01, 0, hb, zb + 0.005, I);
+      inner(w - 2 * t, uh - t - 0.01, d * 0.7, hb);
+      if (open) {
+        box(g, w - 0.01, t, uh - 0.01, 0, hb - t, zf + (uh - 0.01) / 2, F);
+        for (const s of [-1, 1]) box(g, 0.01, 0.01, uh * 0.7, s * (w / 2 - 0.03), hb - 0.01, zf + uh * 0.35, '#9aa0a6');
+      } else {
+        frontPanel(g, w - 0.006, uh - 0.006, 0, hb + 0.003, zf, F, o('panels'));
+        handle(g, o('handle'), 0, h - 0.06, zf + 0.012, false, Gm);
+      }
+    }
+    // Aufsatz
+    const top = o('topper');
+    if (top !== 'ohne') {
+      const th = 0.8, td = classic ? upD : d * 0.6, z0 = zb + td / 2;
+      for (const s of [-1, 1]) box(g, t, th, td, s * (w / 2 - t / 2), h, z0, K);
+      box(g, w, t, td, 0, h + th - t, z0, K);
+      box(g, w - 2 * t, th, 0.01, 0, h, zb + 0.005, top === 'regal' ? I : K);
+      box(g, w - 2 * t, t, td, 0, h + th / 2, z0, K);
+      if (top === 'tueren') for (const s of [-1, 1]) {
+        frontPanel(g, w / 2 - 0.006, th - 0.006, s * w / 4, h + 0.003, zb + td, F, o('panels'));
+        handle(g, o('handle'), s * 0.04, h + th / 2, zb + td + 0.012, true, Gm);
+      }
+    }
   },
   kitchen(g, it) {
     const { w, d, h } = it, P = k => furnMaterial(partSpec(it, k)), o = k => optVal(it, k);
@@ -1375,6 +1465,7 @@ const CATALOG = {
   bed90:      { label: 'Einzelbett',     group: 'Schlafen',        w: 0.9,  d: 2.0,  h: 0.8,  color: '#9a8c7c', b: 'bed' },
   wardrobe:   { label: 'Kleiderschrank', group: 'Schlafen',        w: 2.0,  d: 0.6,  h: 2.2,  color: '#f0ede6', b: 'wardrobe' },
   dresser:    { label: 'Kommode',        group: 'Schlafen',        w: 1.0,  d: 0.45, h: 0.85, color: '#f0ede6', b: 'sideboard' },
+  secretary:  { label: 'Sekretär',       group: 'Wohnen',          w: 0.95, d: 0.5,  h: 1.1,  color: '#c98a45', b: 'secretary' },
   nightstand: { label: 'Nachttisch',     group: 'Schlafen',        w: 0.45, d: 0.4,  h: 0.5,  color: '#8b6a4a', b: 'sideboard' },
   dining:     { label: 'Esstisch',       group: 'Essen & Arbeiten', w: 1.6, d: 0.9,  h: 0.75, color: '#a07850', b: 'table' },
   chair:      { label: 'Stuhl',          group: 'Essen & Arbeiten', w: 0.45, d: 0.52, h: 0.9, color: '#3d3d3d', b: 'chair' },
@@ -1602,6 +1693,7 @@ function setPolyline(line, pts, y = 3.2) {
 // ---------------------------------------------------------------------------
 // Ansicht / Werkzeug
 // ---------------------------------------------------------------------------
+let doorDirty = true;     // Türprüfung beim nächsten Bild neu berechnen
 let mode = '2d';          // '2d' | '3d'
 let tool = 'select';      // select | wall | door | window | calibrate
 let selection = null;     // { kind: 'item'|'wall', id }
@@ -1940,6 +2032,7 @@ function addSlab(g, len, y0, y1, t, off, material, wallId, uvBase) {
 }
 
 function rebuildWalls() {
+  doorDirty = true;
   disposeGroup(wallsGroup);
   const low = mode === '3d' && state.settings.wallMode === 'low';
   for (const w of state.walls) {
@@ -1965,6 +2058,7 @@ function rebuildWalls() {
       addSlab(g, L, 0, 0.05, t * 0.9, 0, wallMaterial(sel, w.type), w.id);
     } else if (w.type === 'door') {
       addSlab(g, L, w.oh, H, t, 0, m3, w.id, uvBase);
+      addDoor3D(g, w, L);
     } else {
       addSlab(g, L, 0, Math.min(w.sill, H), t, 0, m3, w.id, uvBase);
       addSlab(g, L, w.top, H, t, 0, m3, w.id, uvBase);
@@ -2015,6 +2109,7 @@ function rebuildItems() {
   updateSelectionHelper();
 }
 function rebuildItem(it) {
+  doorDirty = true;
   const old = itemObjects.get(it.id);
   if (old) { old.traverse(o => o.geometry && o.geometry.dispose()); itemsGroup.remove(old); }
   const g = buildItemObject(it);
@@ -2766,6 +2861,165 @@ function updateMeasureDims() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Zimmertüren: Türart, Öffnungsseite, Anschlag DIN links/rechts, Öffnungswinkel, Platzprüfung
+// DIN links/rechts (DIN 107): Blick von der Seite, zu der die Tür aufgeht; Bänder links = DIN links.
+// ---------------------------------------------------------------------------
+const DOOR_TYPES = { dreh: 'Drehtür', pendel: 'Pendeltür (öffnet in beide Richtungen)', falt: 'Falttür (2-teilig)', offen: 'nur Öffnung (ohne Türblatt)' };
+const DOOR_GLASS = { ohne: 'ohne', ausschnitt: 'Glasausschnitt', ganz: 'Ganzglas' };
+function doorCfg(w) {
+  const swing = w.swing || (sideRoom(w, 'R') ? 'R' : sideRoom(w, 'L') ? 'L' : 'R');
+  return { dtype: w.dtype || 'dreh', swing, hand: w.hand || 'links', glass: w.glass || 'ohne', angle: w.angle3d ?? 0, maxOpen: w.maxOpen ?? 90, leaf: w.leaf || { type: 'lack', color: '#f4f2ee', gloss: 'satin' } };
+}
+// Bandpunkt an der Wandfläche der Öffnungsseite, Richtung zur Gegenseite (dir), Öffnungsrichtung (n)
+function doorFrame(w) {
+  const c = doorCfg(w), dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L;
+  const s = c.swing === 'R' ? 1 : -1, nx = -uz * s, nz = ux * s;
+  const aLeft = -ux * -nz + -uz * nx > 0; // Blick zur Wand (-n): links davon liegt (-nz, nx)
+  const hingeA = (c.hand === 'links') === aLeft, H = hingeA ? w.a : w.b;
+  return { c, L, s, hingeA, dir: hingeA ? { x: ux, z: uz } : { x: -ux, z: -uz }, n: { x: nx, z: nz }, hinge: { x: H.x + nx * w.t / 2, z: H.z + nz * w.t / 2 } };
+}
+// Türblatt-Strecken bei Winkel th (Grad), lokal: x entlang der Öffnung ab Band, y in Öffnungsrichtung
+function leafSegments(dtype, L, th) {
+  const r = THREE.MathUtils.degToRad(th);
+  if (dtype === 'falt') { const F = [(L / 2) * Math.cos(r), (L / 2) * Math.sin(r)], S = [L * Math.cos(r), 0]; return [[[0, 0], F], [F, S]]; }
+  return [[[0, 0], [L * Math.cos(r), L * Math.sin(r)]]];
+}
+const doorWorld = (fr, x, y, sg = 1) => ({ x: fr.hinge.x + fr.dir.x * x + fr.n.x * y * sg, z: fr.hinge.z + fr.dir.z * x + fr.n.z * y * sg });
+// Hindernisse: Möbel bis Türhöhe (ohne Teppiche/Deckenelemente) und andere, nicht in Linie liegende Wände
+function doorObstacles(w) {
+  const obs = [], top = w.oh ?? 2;
+  for (const it of items()) if (it.h > 0.03 && (it.elev || 0) < top) obs.push({ name: CATALOG[it.type].label, poly: itemCorners(it) });
+  const dx = w.b.x - w.a.x, dz = w.b.z - w.a.z, L = Math.hypot(dx, dz);
+  for (const o of state.walls) {
+    const ox = o.b.x - o.a.x, oz = o.b.z - o.a.z, OL = Math.hypot(ox, oz);
+    if (o === w || OL < 1e-6 || Math.abs((dx * oz - dz * ox) / (L * OL)) < 0.05) continue;
+    const nx = (-oz / OL) * o.t / 2, nz = (ox / OL) * o.t / 2;
+    obs.push({ name: 'Wand', poly: [{ x: o.a.x + nx, z: o.a.z + nz }, { x: o.b.x + nx, z: o.b.z + nz }, { x: o.b.x - nx, z: o.b.z - nz }, { x: o.a.x - nx, z: o.a.z - nz }] });
+  }
+  return obs;
+}
+// Wie weit lässt sich die Tür öffnen, bevor das Türblatt ein Hindernis berührt? (je Öffnungsseite)
+function doorClearance(w) {
+  const fr = doorFrame(w), c = fr.c;
+  if (c.dtype === 'offen') return [];
+  const obs = doorObstacles(w), maxA = c.dtype === 'dreh' ? c.maxOpen : 90;
+  return (c.dtype === 'pendel' ? [1, -1] : [1]).map(sg => {
+    let limit = maxA, blocker = null;
+    outer: for (let th = 1; th <= maxA; th++) {
+      for (const [p, q] of leafSegments(c.dtype, fr.L, th)) {
+        const n = Math.max(2, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 0.02));
+        for (let i = 1; i <= n; i++) {
+          const pt = doorWorld(fr, p[0] + ((q[0] - p[0]) * i) / n, p[1] + ((q[1] - p[1]) * i) / n, sg);
+          for (const o of obs) if (pointInPoly(pt, o.poly)) { limit = th - 1; blocker = o.name; break outer; }
+        }
+      }
+    }
+    return { sg, limit, blocker, maxA };
+  });
+}
+// Fläche, die das Türblatt zwischen den Winkeln a0 und a1 überstreicht (obere Hüllkurve), als Weltpunkte
+function doorEnvelope(fr, a0, a1, sg = 1) {
+  const L = fr.L, N = 60, ymax = new Array(N + 1).fill(0), x0 = -L;
+  for (let th = a0; th <= a1 + 1e-6; th += 1) for (const [p, q] of leafSegments(fr.c.dtype, L, th)) for (let i = 0; i <= 30; i++) {
+    const x = p[0] + ((q[0] - p[0]) * i) / 30, y = p[1] + ((q[1] - p[1]) * i) / 30, k = Math.round(((x - x0) / (2 * L)) * N);
+    if (k >= 0 && k <= N && y > ymax[k]) ymax[k] = y;
+  }
+  const pts = [];
+  for (let k = 0; k <= N; k++) if (ymax[k] > 0.001) pts.push(doorWorld(fr, x0 + (2 * L * k) / N, ymax[k], sg));
+  if (pts.length < 2) return [];
+  const xs = pts.map(p => p), first = doorWorld(fr, x0 + (2 * L * (ymax.findIndex(v => v > 0.001))) / N, 0, sg), last = doorWorld(fr, x0 + (2 * L * (N - [...ymax].reverse().findIndex(v => v > 0.001))) / N, 0, sg);
+  return [first, ...xs, last, doorWorld(fr, 0, 0, sg)];
+}
+const doorResults = new Map();
+const doorGroup = new THREE.Group();
+scene.add(doorGroup);
+const doorLabelEls = [];
+const doorMat = { ok: new THREE.MeshBasicMaterial({ color: '#2f9e44', transparent: true, opacity: 0.22, depthTest: false }), bad: new THREE.MeshBasicMaterial({ color: '#e03131', transparent: true, opacity: 0.3, depthTest: false }) };
+const doorLineMat = new THREE.LineBasicMaterial({ color: '#1d1e20', depthTest: false });
+function polyMesh(pts, m) {
+  const shape = new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, -p.z)));
+  const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), m);
+  mesh.rotation.x = -Math.PI / 2; mesh.position.y = 3.0; mesh.renderOrder = 8;
+  return mesh;
+}
+function updateDoorChecks() {
+  disposeGroup(doorGroup);
+  doorResults.clear();
+  let li = 0;
+  if (mode === '2d') for (const w of state.walls) {
+    if (w.type !== 'door') continue;
+    const res = doorClearance(w), fr = doorFrame(w);
+    doorResults.set(w.id, res);
+    for (const r of res) {
+      if (r.limit > 0) { const env = doorEnvelope(fr, 0, r.limit, r.sg); if (env.length > 2) doorGroup.add(polyMesh(env, doorMat.ok)); }
+      if (r.limit < r.maxA) { const env = doorEnvelope(fr, Math.max(0, r.limit), r.maxA, r.sg); if (env.length > 2) doorGroup.add(polyMesh(env, doorMat.bad)); }
+      for (const [p, q] of leafSegments(fr.c.dtype, fr.L, Math.min(r.limit, 90))) {
+        const a = doorWorld(fr, p[0], p[1], r.sg), b = doorWorld(fr, q[0], q[1], r.sg);
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a.x, 3.05, a.z), new THREE.Vector3(b.x, 3.05, b.z)]), doorLineMat);
+        l.renderOrder = 9; doorGroup.add(l);
+      }
+      if (r.limit < Math.min(90, r.maxA)) {
+        const el = doorLabelEls[li] || measureLayer.appendChild(Object.assign(document.createElement('div'), { className: 'dim-label door-warn' }));
+        doorLabelEls[li++] = el;
+        el.textContent = `⚠ nur ${r.limit}°`;
+        el.dataset.x = doorWorld(fr, fr.L / 2, Math.min(0.5, fr.L / 2), r.sg).x; el.dataset.z = doorWorld(fr, fr.L / 2, Math.min(0.5, fr.L / 2), r.sg).z;
+      }
+    }
+  }
+  for (let i = 0; i < doorLabelEls.length; i++) doorLabelEls[i].style.display = i < li ? '' : 'none';
+  doorLabelEls.length = Math.max(doorLabelEls.length, li);
+}
+function placeDoorLabels() {
+  for (const el of doorLabelEls) {
+    if (el.style.display === 'none') continue;
+    if (mode !== '2d') { el.style.display = 'none'; continue; }
+    const v = new THREE.Vector3(+el.dataset.x, 3, +el.dataset.z).project(camera());
+    el.style.transform = `translate(${((v.x + 1) / 2) * canvas.clientWidth}px, ${((1 - v.y) / 2) * canvas.clientHeight}px) translate(-50%, -50%)`;
+  }
+}
+function doorStatusText(w) {
+  const res = doorResults.get(w.id) || doorClearance(w);
+  if (!res.length) return 'Ohne Türblatt – keine Platzprüfung.';
+  return res.map(r => {
+    const where = res.length > 1 ? (r.sg > 0 ? 'Richtung 1: ' : 'Richtung 2: ') : '';
+    const want = Math.min(90, r.maxA);
+    return r.limit >= r.maxA ? `✔ ${where}öffnet frei bis ${r.maxA}°` : `${r.limit >= want ? '✔' : '⚠'} ${where}öffnet nur bis ${r.limit}° – stößt an: ${r.blocker}`;
+  }).join('<br>');
+}
+// 3D: Zarge und Türblatt(er) im Wandabschnitt (lokale Koordinaten der Wandgruppe)
+function makeLeaf(width, height, M, glass) {
+  const g = new THREE.Group(), t = 0.04;
+  if (glass === 'ohne') box(g, width, height, t, width / 2, 0, 0, M);
+  else {
+    const fr = glass === 'ganz' ? 0.06 : 0.14, G = furnMaterial({ type: 'glass', color: '#d6ecf5', opacity: 0.3, gloss: 'gloss' });
+    const gy0 = glass === 'ganz' ? fr : height * 0.42, gy1 = height - fr;
+    for (const x of [fr / 2, width - fr / 2]) box(g, fr, height, t, x, 0, 0, M);
+    box(g, width - 2 * fr, gy0, t, width / 2, 0, 0, M);
+    box(g, width - 2 * fr, fr, t, width / 2, gy1, 0, M);
+    box(g, width - 2 * fr, gy1 - gy0, 0.008, width / 2, gy0, 0, G);
+  }
+  const hm = mat('#9aa0a6', { metalness: 0.7, roughness: 0.3 });
+  for (const s of [-1, 1]) box(g, 0.12, 0.02, 0.02, width - 0.12, 1.04, s * (t / 2 + 0.03), hm);
+  return g;
+}
+function addDoor3D(g, w, L) {
+  const fr = doorFrame(w), c = fr.c, M = furnMaterial(c.leaf), oh = w.oh ?? 2, t = w.t;
+  for (const s of [-1, 1]) box(g, 0.04, oh, t + 0.02, s * (L / 2 - 0.02), 0, 0, M);
+  box(g, L, 0.04, t + 0.02, 0, oh - 0.04, 0, M);
+  if (c.dtype === 'offen') return;
+  const hx = fr.hingeA ? -L / 2 + 0.04 : L / 2 - 0.04, dirx = fr.hingeA ? 1 : -1, lw = L - 0.08, lh = oh - 0.05;
+  let th = c.angle, zs = fr.s;
+  if (c.dtype === 'pendel') { th = Math.max(-90, Math.min(90, th)); if (th < 0) { zs = -zs; th = -th; } }
+  else th = Math.max(0, Math.min(c.dtype === 'dreh' ? 180 : 90, th));
+  const r = THREE.MathUtils.degToRad(th), pz = zs * (t / 2 - 0.02);
+  const place = (leaf, x, z, ang) => { const p = new THREE.Group(); p.position.set(x, 0.005, z); p.rotation.y = Math.atan2(-zs * Math.sin(ang), dirx * Math.cos(ang)); p.add(leaf); g.add(p); };
+  if (c.dtype === 'falt') {
+    place(makeLeaf(lw / 2, lh, M, c.glass), hx, pz, r);
+    place(makeLeaf(lw / 2, lh, M, c.glass), hx + dirx * (lw / 2) * Math.cos(r), pz + zs * (lw / 2) * Math.sin(r), -r);
+  } else place(makeLeaf(lw, lh, M, c.glass), hx, pz, r);
+}
+
 function toolAction(p, e) {
   if (tool === 'measure') measureClick(p, e);
   else if (tool === 'wall') wallToolClick(p, e);
@@ -3199,6 +3453,22 @@ function renderProps() {
         ${w.type === 'door' ? numField('Türhöhe (cm)', 'oh', cmTxt(w.oh)) : ''}
         ${w.type === 'window' ? numField('Brüstung (cm)', 'sill', cmTxt(w.sill), 'min="0"') + numField('Oberkante (cm)', 'top', cmTxt(w.top)) : ''}
       </div>
+      ${w.type === 'door' ? (() => {
+        const c = doorCfg(w), sideName = sd => { const r = sideRoom(w, sd); return r ? `in „${esc(r.name)}“` : (sd === 'R' ? 'nach außen (Seite 1)' : 'nach außen (Seite 2)'); };
+        const sel = (k, opts, v) => `<select data-door="${k}">${Object.entries(opts).map(([ov, ol]) => `<option value="${ov}" ${ov === v ? 'selected' : ''}>${ol}</option>`).join('')}</select>`;
+        return `<h3 style="margin-top:12px">Türblatt</h3>
+          <label>Türart${sel('dtype', DOOR_TYPES, c.dtype)}</label>
+          ${c.dtype === 'offen' ? '' : `<div class="grid2">
+            <label>${c.dtype === 'pendel' ? 'Richtung 1' : 'Öffnet'}${sel('swing', { R: sideName('R'), L: sideName('L') }, c.swing)}</label>
+            <label>Anschlag (Bänder)${sel('hand', { links: 'DIN links', rechts: 'DIN rechts' }, c.hand)}</label>
+            <label>Glas${sel('glass', DOOR_GLASS, c.glass)}</label>
+            <label>Öffnungswinkel 3D (°)<input type="number" data-door="angle3d" step="5" min="${c.dtype === 'pendel' ? -90 : 0}" max="${c.dtype === 'dreh' ? 180 : 90}" value="${c.angle}"></label>
+            ${c.dtype === 'dreh' ? `<label>Prüfen bis (°)<input type="number" data-door="maxOpen" step="5" min="30" max="180" value="${c.maxOpen}"></label>` : ''}
+          </div>
+          <p class="hint">DIN links/rechts: von der Seite gesehen, zu der die Tür aufgeht; Bänder links = DIN links.${c.dtype === 'pendel' ? ' Pendeltür: negativer Winkel öffnet in Richtung 2.' : ''}</p>
+          <p id="doorStatus"><b>${doorStatusText(w)}</b></p>
+          ${furnEditorHtml('fp_leaf', 'Türblatt & Zarge', c.leaf, ['lack', 'wood', 'metal'], !!w.leaf)}`}`;
+      })() : ''}
       ${['L', 'R'].map(side => {
         const room = sideRoom(w, side), own = variant().wallSides[`${w.id}:${side}`];
         const title = room ? `Seite zum Raum „${esc(room.name)}“` : `Seite ohne Raum (${side === 'L' ? 'links' : 'rechts'} in Zeichenrichtung)`;
@@ -3209,6 +3479,15 @@ function renderProps() {
       <div class="row"><button id="pDel" class="danger">Löschen</button></div>
       <p class="hint">Oberflächen gelten für die Variante „${esc(variant().name)}“ und sind in der 3D-Ansicht sichtbar. Die Länge wird am Endpunkt verändert, angeschlossene Wände folgen. Wandecken (orange Quadrate) lassen sich im 2D-Werkzeug „Auswählen“ ziehen.</p>`;
     el.querySelector('[data-f="type"]').value = w.type;
+    el.querySelectorAll('[data-door]').forEach(inp => (inp.onchange = () => {
+      const k = inp.dataset.door;
+      let v = inp.value;
+      if (k === 'angle3d' || k === 'maxOpen') { v = parseFloat(v); if (!isFinite(v)) return renderProps(); }
+      pushUndo();
+      w[k] = v;
+      rebuildWalls(); updateDoorChecks(); renderProps(); scheduleSave();
+    }));
+    if (w.type === 'door') bindFurnEditor('fp_leaf', doorCfg(w).leaf, ['lack', 'wood', 'metal'], spec => { pushUndo(); if (spec) w.leaf = spec; else delete w.leaf; rebuildWalls(); renderProps(); scheduleSave(); });
     for (const side of ['L', 'R']) {
       const key = `${w.id}:${side}`;
       el.querySelector(`[data-side="${side}"]`).onchange = e => {
@@ -3531,11 +3810,16 @@ function planSVG(o, L) {
       if (o.dimWalls) out.push(text(mx, mz, 'F ' + cmInt(L0), 1.8, `fill="#2e3136" ${halo} ${rot}`));
     } else {
       out.push(`<polygon points="${pts}" fill="#fff"/>`);
-      // Türblatt und Schwenkbogen zur Raumseite
-      const side = sideRoom(w, 'R') ? 1 : sideRoom(w, 'L') ? -1 : 1, sx = -uz * side, sz = ux * side, hx = w.a.x + sx * w.t / 2, hz = w.a.z + sz * w.t / 2;
-      const tip = { x: hx + sx * L0, z: hz + sz * L0 }, end = { x: hx + ux * L0, z: hz + uz * L0 };
-      out.push(`<line x1="${f(hx)}" y1="${f(hz)}" x2="${f(tip.x)}" y2="${f(tip.z)}" stroke="#2e3136" stroke-width="${f(mm(0.35))}"/>`);
-      out.push(`<path d="M ${f(tip.x)} ${f(tip.z)} A ${f(L0)} ${f(L0)} 0 0 ${side > 0 ? 0 : 1} ${f(end.x)} ${f(end.z)}" fill="none" stroke="#2e3136" stroke-width="${f(mm(0.2))}" stroke-dasharray="${f(mm(1))} ${f(mm(0.7))}"/>`);
+      // Türblatt (90° geöffnet) und überstrichene Fläche gestrichelt, nach Türart und Anschlag
+      const fr = doorFrame(w);
+      if (fr.c.dtype !== 'offen') for (const sg of fr.c.dtype === 'pendel' ? [1, -1] : [1]) {
+        const env = doorEnvelope(fr, 0, 90, sg);
+        if (env.length > 2) out.push(`<polygon points="${env.map(p => `${f(p.x)},${f(p.z)}`).join(' ')}" fill="none" stroke="#2e3136" stroke-width="${f(mm(0.2))}" stroke-dasharray="${f(mm(1))} ${f(mm(0.7))}"/>`);
+        for (const [p, q] of leafSegments(fr.c.dtype, fr.L, 90)) {
+          const a2 = doorWorld(fr, p[0], p[1], sg), b2 = doorWorld(fr, q[0], q[1], sg);
+          out.push(`<line x1="${f(a2.x)}" y1="${f(a2.z)}" x2="${f(b2.x)}" y2="${f(b2.z)}" stroke="#2e3136" stroke-width="${f(mm(0.35))}"/>`);
+        }
+      }
       if (o.dimWalls) out.push(text(mx, mz, 'T ' + cmInt(L0), 1.8, `fill="#2e3136" ${halo} ${rot}`));
     }
   }
@@ -3709,6 +3993,7 @@ function updateLamps() {
     l.intensity = sp.intensity * (evening ? 14 : 6);
   });
 }
+let doorTick = 0;
 renderer.setAnimationLoop(() => {
   updateLamps();
   if (mode === '3d') {
@@ -3720,6 +4005,8 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera());
   updateLabels();
   updateMeasureDims();
+  if (doorDirty || ++doorTick % 8 === 0 || (mode !== '2d' && doorGroup.children.length)) { doorDirty = false; updateDoorChecks(); }
+  placeDoorLabels();
 });
 
 // für automatisierte Tests

@@ -13,6 +13,13 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
 2. **Maßstab**: Zwei Punkte mit bekanntem Abstand anklicken, zum Beispiel die Enden einer bemaßten Wand. Danach die echte Länge in cm eingeben.
 3. **Wand**: Wände nachzeichnen. Jeder Klick setzt einen Punkt. Doppelklick, Enter oder Esc beendet den Zug. Das Tool fängt an vorhandenen Wandenden und an 45°-Winkeln; mit gedrückter Shift-Taste wird nicht gefangen.
 4. **Tür / Fenster**: Auf eine Wand klicken. Die Öffnung wird mit der Standardbreite eingesetzt.
+   **Zimmertüren:** Tür anklicken und unter „Türblatt“ einstellen:
+   - Türart: Drehtür, Pendeltür (öffnet in beide Richtungen), Falttür (2-teilig) oder nur Öffnung
+   - in welchen Raum die Tür aufgeht
+   - Anschlag **DIN links/rechts**: von der Seite gesehen, zu der die Tür aufgeht; Bänder links = DIN links
+   - Glas (ohne, Glasausschnitt, Ganzglas), Öffnungswinkel für die 3D-Ansicht, Material von Türblatt und Zarge
+
+   **Platzprüfung** im 2D-Grundriss: Die Fläche, die das Türblatt beim Öffnen überstreicht, ist grün eingezeichnet. Stößt die Tür an ein Möbel oder eine Wand, wird der restliche Bereich rot und am Türbogen steht z. B. „⚠ nur 49°“. In den Eigenschaften der Tür steht, woran sie stößt. Geprüft werden Möbel bis zur Türhöhe; Teppiche und Deckenleuchten zählen nicht. Bei Drehtüren lässt sich der Prüfwinkel bis 180° erhöhen, z. B. für Türen, die bis an die Wand aufgehen sollen.
 5. **Raum**: In einen Raum klicken oder tippen, der ringsum von Wänden umschlossen ist. Das Tool erkennt den Raum automatisch, Türen und Fenster zählen dabei als Begrenzung.
    Unter „Eigenschaften“ vergibst du Name und Bodenfarbe. Angezeigt wird die **Innenfläche** bis zur Wandinnenseite. Ändern sich die Wände, wird der Raum automatisch neu berechnet.
    Ist ein Bereich nicht geschlossen, zeichnest du ihn mit **„Raum ✎“** als Polygon von Hand. Ecken setzen, dann schließen per Klick auf den ersten Punkt, Doppelklick, Enter oder „Fertig“.
@@ -30,6 +37,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
    - **Ausführung** je nach Möbel:
      - Schränke: Anzahl Türen, Dreh- oder Schiebetüren, Schubladen, Kassettenfront, Kranz, Sockel/Füße/Kugelfüße, Griffart, **Glaseinsatz** (obere Hälfte, untere Hälfte oder ganze Tür; Glas klar, getönt oder milchig). Hinter dem Glas sind Einlegeböden und Rückwand zu sehen, ihre Farbe stellst du unter „Innenraum (hinter Glas)“ ein. Den Glaseinsatz gibt es auch bei Kommode, Sideboard, Nachttisch und TV-Board.
      - Kommoden und Sideboards: Schubladen-Reihen und -Spalten, Türen
+     - **Sekretär:** klassisch (Schrägklappe) oder modern (gerade Klappe), **Schreibklappe offen oder geschlossen**. Offen sieht man Schreibfläche, Fächer und kleine Schubladen. Dazu Schubladen unten, Aufsatz (offenes Regal oder mit Türen), Kassettenfront, Unterbau und Griffe
      - Regale: Fächer, Rückwand, Türen unten
      - Sofas und Sessel: Armlehnen, Sitzkissen, Rückenkissen, Füße, Kufen oder Drehfuß
      - Stühle: Beine, Bürostuhl oder Freischwinger, Armlehnen

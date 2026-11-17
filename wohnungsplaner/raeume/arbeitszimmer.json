@@ -273,7 +273,7 @@
     },
     {
      "id": "az013",
-     "type": "dresser",
+     "type": "secretary",
      "x": 2.975,
      "z": 0.25,
      "rot": 0,
@@ -297,16 +297,12 @@
        "type": "metal",
        "color": "#b5913f",
        "gloss": "satin"
-      },
-      "fuesse": {
-       "type": "wood",
-       "color": "#c98a45",
-       "gloss": "satin"
       }
      },
      "opts": {
+      "style": "klassisch",
+      "open": false,
       "drawers": 3,
-      "doors": 1,
       "panels": true,
       "base": "sockel",
       "handle": "muschel"
