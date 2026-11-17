@@ -40,6 +40,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
    - **Wandgegenstände** (Bilder, Spiegel, Uhr, Wandregal, Vorhang, Wandleuchte, LED-Leiste) rasten beim Hinzufügen und Ziehen an der nächsten Wand ein, bis 60 cm Abstand. Sie drehen sich dabei zur Raumseite, die Höhe stellst du unter „über Boden“ ein. Decken- und Pendelleuchten sowie die Hängepflanze hängen automatisch unter der Decke (Standard-Wandhöhe).
    - **Bilder:** Motiv abstrakt, Landschaft oder Farbflächen, oder ein **eigenes Foto** über „Eigenes Foto als Motiv laden…“. Das Foto wird auf höchstens 800 px verkleinert und mit gespeichert. Dazu Rahmen und Passepartout.
    - **Lampen** geben in der 3D-Ansicht Licht ab: an/aus, Lichtfarbe (warm-, neutral-, kaltweiß), Helligkeit. Mit dem Schalter **„Licht: Tag/Abend“** oben dunkelst du die Grundbeleuchtung ab, dann sieht man die Lampen deutlich. Gleichzeitig leuchten die 8 Lampen, die dem Blickpunkt am nächsten sind. Im 2D-Grundriss ist das Lampenlicht aus.
+   - **Aufbau-Spots:** Bei Kleiderschrank, Regal, Kommode, Sideboard, Nachttisch und TV-Board stellst du unter „Ausführung“ die Anzahl Spots ein (0–8). Sie sitzen gleichmäßig verteilt oben auf der Vorderkante, ragen über die Front hinaus und beleuchten sie von oben. Einstellbar sind an/aus, Neigung zur Front, Lichtfarbe und Helligkeit. Die Spots wandern mit dem Möbel mit. Gleichzeitig leuchten die 8 Spots, die dem Blickpunkt am nächsten sind; am besten sichtbar mit „Licht: Abend“.
    - **Oberflächen je Teil**, z. B. Korpus, Fronten, Griffe, Bezug, Kissen, Tischplatte, Beine: Holz (Kiefer, Eiche, Buche, Nussbaum …), Lack/Kunststoff, Metall (Edelstahl, Chrom, Schwarz, Messing), Glas (klar, getönt, milchig), Stoff mit Muster (uni, Leinen, Cord, Samt, Bouclé, Karo, Streifen, Fischgrät) und Leder, jeweils mit Farbe und Glanzgrad. „Standard wiederherstellen“ setzt ein Teil zurück.
 7. **📏 Messen** (nur im 2D-Grundriss):
    - **Freies Messen:** Werkzeug „Messen“ (Taste `M`) wählen und zwei Punkte anklicken oder antippen. Angezeigt wird der Abstand in cm, bei schrägen Strecken zusätzlich die waagerechte (↔) und senkrechte (↕) Länge. Der Punkt rastet an Ecken ein (Raum-, Wand- und Möbelecken), sonst an Wand-, Raum- und Möbelkanten und waagerecht oder senkrecht zum ersten Punkt. Mit gedrückter `Shift`-Taste wird nicht gefangen. Die Messung ist vorübergehend: Der nächste Klick beginnt eine neue, `Esc` oder ein Werkzeugwechsel löscht sie.
@@ -65,6 +66,17 @@ Tastenkürzel: `R` dreht um 90°, `Shift+R` um 15°, `Entf` löscht, `Strg+D` du
 In der 3D-Ansicht ist der Zoom auf 0,5 m bis 60 m Abstand zum Drehpunkt begrenzt. Die Schrittweite pro Mausrad-Rastung stellst du oben unter **„Zoom“** ein: fein 1 %, mittel 2 % (Standard) oder grob 5 %. Sie gilt unabhängig von Bildschirm und Browser-Zoom. Gerät die Ansicht trotzdem durcheinander, stellt **„Zentrieren“** sie wieder her.
 
 In der 3D-Ansicht lassen sich die Wände auf „transparent“ oder „niedrig (1 m)“ stellen, damit du besser in die Räume siehst.
+
+## Drucken
+
+**„🖨 Drucken…“** öffnet einen Dialog:
+
+- **Inhalt:** 2D-Grundriss, 3D-Ansicht (so wie sie gerade eingestellt ist, auch mit „Licht: Abend“) und Möbelliste. Die Möbelliste ist nach Räumen gruppiert, mit Maßen, Ausführung und Oberflächen. Jeder Teil kommt auf eine eigene Seite.
+- **Maße im Grundriss:** Raum-Innenmaße (rot), Wandlängen auf der Raumseite mit Türen (T) und Fenstern (F) sowie Möbelmaße (B × T). Raumname und Fläche stehen immer dabei, unten auch eine Maßstabsleiste.
+- **Papier:** A4 oder A3, quer oder hoch.
+- **Maßstab:** „passend“ füllt die Seite. Mit 1:50 oder 1:100 kannst du mit dem Lineal nachmessen. Passt der Grundriss nicht aufs Papier, weist der Dialog darauf hin.
+
+Im Druckfenster des Browsers die Skalierung auf **100 % / „Tatsächliche Größe“** stellen, damit 1:50 und 1:100 stimmen, und **Hintergrundgrafiken** einschalten. Dort lässt sich der Ausdruck auch als PDF speichern.
 
 ## Speichern
 
