@@ -610,9 +610,10 @@ function pictureMaterial(it) {
   return m;
 }
 
+const INNER_PART = { label: 'Innenraum (hinter Glas)', kinds: K_WOOD, def: () => sp('lack', '#eee8dc', { gloss: 'matt' }), show: it => optVal(it, 'glass') !== 'ohne' };
 const FURN = {
   wardrobe: {
-    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Türen / Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec } },
+    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Türen / Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec }, innen: INNER_PART },
     opts: {
       doors: OPT.num('Anzahl Türen', 1, 8, it => Math.max(1, Math.round(it.w / 0.5))),
       doorType: OPT.sel('Türart', { dreh: 'Drehtüren', schiebe: 'Schiebetüren' }, 'dreh'),
@@ -621,11 +622,13 @@ const FURN = {
       crown: OPT.chk('Kranz oben', false),
       base: OPT.sel('Unterbau', { sockel: 'Sockel', fuesse: 'Füße', kugel: 'Kugelfüße', ohne: 'ohne' }, 'sockel'),
       handle: OPT.sel('Griffe', HANDLES, 'stange'),
+      glass: OPT.sel('Glaseinsatz Türen', { ohne: 'ohne', oben: 'obere Hälfte', unten: 'untere Hälfte', ganz: 'ganze Tür' }, 'ohne'),
+      glassType: { ...OPT.sel('Glasart', { klar: 'klar', getoent: 'getönt', milchig: 'milchig' }, 'klar'), show: it => optVal(it, 'glass') !== 'ohne' },
       ...SPOT_OPTS,
     },
   },
   sideboard: {
-    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec }, fuesse: { label: 'Füße / Sockel', kinds: K_METAL, def: darkSpec } },
+    parts: { korpus: { label: 'Korpus', kinds: K_WOOD, def: mainSpec }, front: { label: 'Fronten', kinds: K_FRONT, def: mainSpec }, griffe: { label: 'Griffe', kinds: K_METAL, def: handleSpec }, fuesse: { label: 'Füße / Sockel', kinds: K_METAL, def: darkSpec }, innen: INNER_PART },
     opts: {
       drawers: OPT.num('Schubladen (Reihen)', 0, 8, it => ({ dresser: 3, nightstand: 1 }[it.type] ?? 0)),
       drawerCols: OPT.num('Schubladen nebeneinander', 1, 4, 1),
@@ -633,6 +636,8 @@ const FURN = {
       panels: OPT.chk('Kassettenfront', false),
       base: OPT.sel('Unterbau', { fuesse: 'Füße', sockel: 'Sockel', kugel: 'Kugelfüße', kufe: 'Kufen', ohne: 'ohne (hängend/flach)' }, 'fuesse'),
       handle: OPT.sel('Griffe', HANDLES, 'stange'),
+      glass: OPT.sel('Glaseinsatz Türen', { ohne: 'ohne', oben: 'obere Hälfte', unten: 'untere Hälfte', ganz: 'ganze Tür' }, 'ohne'),
+      glassType: { ...OPT.sel('Glasart', { klar: 'klar', getoent: 'getönt', milchig: 'milchig' }, 'klar'), show: it => optVal(it, 'glass') !== 'ohne' },
       ...SPOT_OPTS,
     },
   },
@@ -754,6 +759,33 @@ function handle(g, kind, x, y, z, vertical, M) {
   else box(g, 0.07, 0.03, 0.02, x, y - 0.015, z, M);
 }
 // Front (Tür oder Schublade) mit optionaler Kassette
+const GLASS_KINDS = { klar: { color: '#d6ecf5', opacity: 0.25 }, getoent: { color: '#4a4f55', opacity: 0.55 }, milchig: { color: '#f4f6f7', opacity: 0.82 } };
+// Korpus: massiv, oder bei Glastüren hohl mit Rückwand und Einlegeböden (damit man hinter dem Glas etwas sieht)
+function cabinetBody(g, w, h, d, y, zc, K, it) {
+  if (optVal(it, 'glass') === 'ohne') return box(g, w, h, d, 0, y, zc, K);
+  const t = 0.02, I = furnMaterial(partSpec(it, 'innen'));
+  for (const s of [-1, 1]) box(g, t, h, d, s * (w / 2 - t / 2), y, zc, K);
+  box(g, w - 2 * t, t, d, 0, y, zc, K);
+  box(g, w - 2 * t, t, d, 0, y + h - t, zc, K);
+  box(g, w - 2 * t, h - 2 * t, 0.008, 0, y + t, zc - d / 2 + 0.004, I);
+  const n = Math.max(1, Math.round((h - 2 * t) / 0.36));
+  for (let i = 1; i < n; i++) box(g, w - 2 * t, 0.018, d - 0.03, 0, y + t + (i * (h - 2 * t)) / n, zc + 0.005, I);
+}
+// Tür mit optionalem Glaseinsatz: Rahmen um die Glasfläche, der Rest als normale Front (mit Kassette, falls gewählt)
+function cabinetDoor(g, it, w, h, x, y, zFront, F, panels) {
+  const mode = optVal(it, 'glass');
+  if (mode === 'ohne') return frontPanel(g, w, h, x, y, zFront, F, panels);
+  const G = furnMaterial({ type: 'glass', ...GLASS_KINDS[optVal(it, 'glassType')], gloss: 'gloss' }), fr = Math.min(0.07, w * 0.18);
+  let gy = y, gh = h;
+  if (mode === 'oben') { frontPanel(g, w, h / 2, x, y, zFront, F, panels); gy = y + h / 2; gh = h / 2; }
+  if (mode === 'unten') { frontPanel(g, w, h / 2, x, y + h / 2, zFront, F, panels); gh = h / 2; }
+  const z = zFront - 0.01;
+  for (const s of [-1, 1]) box(g, fr, gh, 0.02, x + s * (w / 2 - fr / 2), gy, z, F);
+  if (mode !== 'oben') box(g, w - 2 * fr, fr, 0.02, x, gy, z, F); else box(g, w - 2 * fr, fr / 2, 0.02, x, gy, z, F);
+  if (mode !== 'unten') box(g, w - 2 * fr, fr, 0.02, x, gy + gh - fr, z, F); else box(g, w - 2 * fr, fr / 2, 0.02, x, gy + gh - fr / 2, z, F);
+  const gb = mode === 'oben' ? fr / 2 : fr, gt = mode === 'unten' ? fr / 2 : fr;
+  box(g, w - 2 * fr, gh - gb - gt, 0.006, x, gy + gb, z, G);
+}
 function frontPanel(g, w, h, x, y, zFront, F, panels) {
   box(g, w, h, 0.02, x, y, zFront - 0.01, F);
   if (panels && w > 0.15 && h > 0.15) box(g, w - Math.min(0.12, w * 0.3), h - Math.min(0.14, h * 0.25), 0.012, x, y + Math.min(0.07, h * 0.125), zFront + 0.004, F);
@@ -773,7 +805,7 @@ const B = {
     const baseH = baseHeight(o('base')), crown = o('crown') ? Math.min(0.12, h * 0.06) : 0;
     baseFeet(g, o('base'), w, d, baseH, K);
     const bodyH = h - baseH - crown, zf = d / 2;
-    box(g, w, bodyH, d - 0.02, 0, baseH, -0.01, K);
+    cabinetBody(g, w, bodyH, d - 0.02, baseH, -0.01, K, it);
     if (crown) { box(g, w + 0.06, crown * 0.4, d + 0.02, 0, h - crown, 0.01, K); box(g, w + 0.1, crown * 0.6, d + 0.04, 0, h - crown * 0.6, 0.02, K); }
     const nDr = Math.min(3, Math.round(o('drawers'))), drH = nDr ? Math.min(0.22, bodyH * 0.15) : 0;
     for (let i = 0; i < nDr; i++) {
@@ -786,14 +818,14 @@ const B = {
       const sw = w / n + 0.02;
       for (let i = 0; i < n; i++) {
         const x = -w / 2 + (i + 0.5) * (w / n), z = zf + (i % 2 ? 0.022 : 0);
-        frontPanel(g, sw, dh - 0.006, x, y0 + 0.003, z, F, o('panels'));
+        cabinetDoor(g, it, sw, dh - 0.006, x, y0 + 0.003, z, F, o('panels'));
         if (o('handle') !== 'ohne') box(g, 0.012, 0.3, 0.012, x + (i % 2 ? -1 : 1) * (sw / 2 - 0.04), y0 + dh * 0.45, z + 0.008, Gm);
       }
     } else {
       const dw = w / n;
       for (let i = 0; i < n; i++) {
         const x = -w / 2 + (i + 0.5) * dw;
-        frontPanel(g, dw - 0.006, dh - 0.006, x, y0 + 0.003, zf, F, o('panels'));
+        cabinetDoor(g, it, dw - 0.006, dh - 0.006, x, y0 + 0.003, zf, F, o('panels'));
         const side = n === 1 || i < n / 2 ? 1 : -1;
         handle(g, o('handle'), x + side * (dw / 2 - 0.05), y0 + Math.min(dh * 0.5, 1.1), zf + 0.012, true, Gm);
       }
@@ -805,7 +837,7 @@ const B = {
     const baseH = Math.min(baseHeight(o('base')), h * 0.25);
     baseFeet(g, o('base'), w, d, baseH, P('fuesse'));
     const bodyH = h - baseH, zf = d / 2;
-    box(g, w, bodyH, d - 0.02, 0, baseH, -0.01, K);
+    cabinetBody(g, w, bodyH, d - 0.02, baseH, -0.01, K, it);
     const rows = Math.round(o('drawers')), cols = Math.max(1, Math.round(o('drawerCols'))), nDoor = Math.round(o('doors'));
     const drH = rows ? (nDoor ? Math.min(0.2, bodyH / (rows + 1.5)) : bodyH / rows) : 0;
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
@@ -818,7 +850,7 @@ const B = {
       const dw = w / nDoor;
       for (let i = 0; i < nDoor; i++) {
         const x = -w / 2 + (i + 0.5) * dw;
-        frontPanel(g, dw - 0.006, dh - 0.006, x, baseH + 0.003, zf, F, o('panels'));
+        cabinetDoor(g, it, dw - 0.006, dh - 0.006, x, baseH + 0.003, zf, F, o('panels'));
         const side = nDoor === 1 ? 1 : i < nDoor / 2 ? 1 : -1;
         handle(g, o('handle'), x + side * (dw / 2 - 0.04), baseH + dh * 0.75, zf + 0.012, true, Gm);
       }
@@ -3111,7 +3143,7 @@ function renderProps() {
       ${def.b === 'picture' ? '<div class="row"><button id="pPhoto">Eigenes Foto als Motiv laden…</button></div>' : ''}
       ${def.wall ? '<p class="hint">Rastet beim Ziehen an der nächsten Wand ein (bis 60 cm Abstand).</p>' : ''}
       <h3 style="margin-top:12px">Oberflächen</h3>
-      ${Object.entries(FURN[def.b].parts).map(([k, part]) => furnEditorHtml('fp_' + k, part.label, partSpec(it, k), part.kinds, !!it.parts?.[k])).join('')}
+      ${Object.entries(FURN[def.b].parts).filter(([, part]) => !part.show || part.show(it)).map(([k, part]) => furnEditorHtml('fp_' + k, part.label, partSpec(it, k), part.kinds, !!it.parts?.[k])).join('')}
       <div class="row"><button id="pDup">Duplizieren</button><button id="pDel" class="danger">Löschen</button></div>
       <p class="hint">Ziehen zum Verschieben · R: 90° drehen · Shift+R: 15° · Entf: löschen · Strg+D: duplizieren</p>`;
     el.querySelector('#pReplace').onchange = e => replaceItem(it, e.target.value);

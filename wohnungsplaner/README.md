@@ -28,7 +28,7 @@ Gerendert wird mit [three.js](https://threejs.org/) r160. three.js wird beim Öf
 6. **Möbel hinzufügen** (linke Leiste): Möbel anklicken und dann in 2D oder 3D an die gewünschte Stelle ziehen.
    Unter „Eigenschaften“ lassen sich Maße, Drehung und Höhe über Boden ändern. Mit **„Ersetzen durch“** tauschst du ein Möbelstück an gleicher Position und Drehung gegen ein anderes aus.
    - **Ausführung** je nach Möbel:
-     - Schränke: Anzahl Türen, Dreh- oder Schiebetüren, Schubladen, Kassettenfront, Kranz, Sockel/Füße/Kugelfüße, Griffart
+     - Schränke: Anzahl Türen, Dreh- oder Schiebetüren, Schubladen, Kassettenfront, Kranz, Sockel/Füße/Kugelfüße, Griffart, **Glaseinsatz** (obere Hälfte, untere Hälfte oder ganze Tür; Glas klar, getönt oder milchig). Hinter dem Glas sind Einlegeböden und Rückwand zu sehen, ihre Farbe stellst du unter „Innenraum (hinter Glas)“ ein. Den Glaseinsatz gibt es auch bei Kommode, Sideboard, Nachttisch und TV-Board.
      - Kommoden und Sideboards: Schubladen-Reihen und -Spalten, Türen
      - Regale: Fächer, Rückwand, Türen unten
      - Sofas und Sessel: Armlehnen, Sitzkissen, Rückenkissen, Füße, Kufen oder Drehfuß
